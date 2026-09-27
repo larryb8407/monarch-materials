@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DEMO, DEMO_TRANSCRIPT, DRIVE_AUTO_NEXT, OUTCOME, STORAGE_KEY,
   ROUTE_HOME_KEY, ROUTE_KEY, decorate, fetchAutoBrief, fmtPhone, placeOf, routeLegs, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, summarize, toProspect,
-  type BriefItem, type Line, type OutcomeKey, type Prospect,
+  type BriefItem, type Line, type StatusKey, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
 import bundledProspects from './prospects.json';
@@ -76,6 +76,7 @@ export default function App() {
   const [voice, setVoice] = useState(false);
   const [logoFailed, setLogoFailed] = useState(false);
   const [add, setAdd] = useState<AddForm | null>(null);
+  const [edit, setEdit] = useState<Prospect | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
   const [briefAt, setBriefAt] = useState<string | null>(readBriefAt);
   const [route, setRoute] = useState<number[]>(readRoute);
@@ -355,7 +356,10 @@ export default function App() {
     };
     return (
       <div className="detail">
-        <button className="btn back" onClick={leaveDetail}>← Back</button>
+        <div className="between">
+          <button className="btn back" onClick={leaveDetail}>← Back</button>
+          <button className="btn pill" onClick={() => setEdit({ ...cur, phone: cur.phone ? fmtPhone(cur.phone) : '' })} style={{ height: 40, padding: '0 16px', borderRadius: 20, fontSize: 14 }}>Edit details</button>
+        </div>
         <div className="col" style={{ gap: 6 }}>
           <Chip bg={d.chipBg} fg={d.chipFg} label={d.statusLabel} />
           <h1>{cur.company}</h1>
@@ -701,6 +705,58 @@ export default function App() {
     );
   };
 
+  const renderEdit = () => {
+    if (!edit) return null;
+    type Key = 'company' | 'contact' | 'title' | 'phone' | 'email' | 'type' | 'city' | 'address';
+    const fields: [Key, string, string, string][] = [
+      ['company', 'Company', 'text', ''], ['contact', 'Contact name', 'text', 'First and last'], ['title', 'Title', 'text', 'Owner, estimator, PM'],
+      ['phone', 'Phone', 'tel', '(951) 555-0100'], ['email', 'Email', 'email', ''], ['address', 'Street address', 'text', 'e.g. 1920 Goetz Rd'],
+      ['city', 'City', 'text', 'e.g. Perris'], ['type', 'Type', 'text', 'e.g. Demolition'],
+    ];
+    const set = (k: keyof Prospect) => (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { const v = e.target.value; setEdit(x => x && { ...x, [k]: v }); };
+    const canSave = !!edit.company.trim();
+    const save = () => {
+      if (!canSave) return;
+      const clean = { ...edit, company: edit.company.trim(), phone: (edit.phone || '').replace(/\D/g, '').slice(-10) };
+      persist(prospects.map(p => (p.id === edit.id ? clean : p)));
+      setEdit(null);
+    };
+    const statuses: [StatusKey, string][] = [['new', 'New'], ['follow', 'Follow-up'], ['interested', 'Interested'], ['customer', 'Customer'], ['notnow', 'Not now']];
+    const chips = <T extends string>(list: [T, string][], cur: T | undefined, pick: (v: T) => void) => (
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        {list.map(([v, l]) => <button key={v} className="btn toggle opt" onClick={() => pick(v)} style={{ background: selBg(cur === v), color: selFg(cur === v) }}>{l}</button>)}
+      </div>
+    );
+    return (
+      <div className="scrim" style={{ background: 'rgba(15,13,10,.55)' }}>
+        <div className="sheet" style={{ gap: 12, maxHeight: '92%' }}>
+          <div className="between">
+            <h2>Edit details</h2>
+            <button className="btn sheet-close" onClick={() => setEdit(null)}>Cancel</button>
+          </div>
+          {fields.map(([k, label, type, ph]) => (
+            <label key={k} className="field">{label}
+              <input value={edit[k] || ''} onChange={set(k)} type={type} placeholder={ph} />
+            </label>
+          ))}
+          <span className="field" style={{ marginTop: 4 }}>Materials interested in</span>
+          {chips([['Dumping', 'Dumping'], ['Buying base', 'Buying base'], ['Both', 'Both']], edit.interest, v => setEdit(x => x && { ...x, interest: v }))}
+          <span className="field" style={{ marginTop: 4 }}>Status</span>
+          {chips(statuses, edit.status, v => setEdit(x => x && { ...x, status: v }))}
+          <span className="field" style={{ marginTop: 4 }}>Priority</span>
+          {chips([['normal', 'Normal'], ['top', 'Top priority']], edit.top ? 'top' : 'normal', v => setEdit(x => x && { ...x, top: v === 'top' }))}
+          <label className="field">Why call
+            <textarea className="textarea" value={edit.lead || ''} onChange={set('lead')} placeholder="Project, bid or job that makes them worth calling now" style={{ minHeight: 80, font: "500 16px/1.4 'Barlow',sans-serif", textTransform: 'none', letterSpacing: 0 }} />
+          </label>
+          <label className="field">Notes
+            <textarea className="textarea" value={edit.notes || ''} onChange={set('notes')} placeholder="Who to ask for, what they haul, how often" style={{ minHeight: 80, font: "500 16px/1.4 'Barlow',sans-serif", textTransform: 'none', letterSpacing: 0 }} />
+          </label>
+          <button className="btn btn-cta" onClick={save} style={{ background: canSave ? '#C9A45C' : '#3A352E', color: '#0E0D0B', marginTop: 4 }}>Save details</button>
+        </div>
+      </div>
+    );
+  };
+
   const tabs: [Screen, string][] = [['today', 'Today'], ['prospects', 'Prospects'], ['route', 'Route'], ['log', 'Call log'], ['drive', 'Drive']];
 
   return (
@@ -736,6 +792,7 @@ export default function App() {
       {screen === 'drive' && renderDrive()}
       {renderBrief()}
       {renderAdd()}
+      {renderEdit()}
     </div>
   );
 }
