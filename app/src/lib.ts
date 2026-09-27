@@ -34,6 +34,8 @@ export type BriefItem = Pick<Prospect, 'company' | 'contact' | 'phone' | 'type' 
 
 export const STORAGE_KEY = 'monarch-prospects-v2';
 export const BRIEF_AT_KEY = 'monarch-brief-at';
+/** Fingerprint of the last published briefing the user reviewed, so it is offered only once. */
+export const BRIEF_SEEN_KEY = 'monarch-brief-seen';
 
 /** After a call saved from Drive Mode, advance to the next prospect. */
 export const DRIVE_AUTO_NEXT = true;
@@ -180,3 +182,18 @@ export const decorate = (p: Prospect) => {
   };
 };
 export type Decorated = ReturnType<typeof decorate>;
+
+/** Fetches briefing.csv published next to the app by the daily Claude run. Null when there is none or it can't be reached. */
+export const fetchAutoBrief = async (): Promise<{ text: string; hash: string } | null> => {
+  try {
+    const res = await fetch('./briefing.csv', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const text = (await res.text()).trim();
+    if (!/company/i.test(text.split(/\r?\n/)[0]) || text.split(/\r?\n/).length < 2) return null;
+    let h = 0;
+    for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+    return { text, hash: String(h) };
+  } catch {
+    return null;
+  }
+};

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
-  BRIEF_AT_KEY, CLAUDE_BRIEF_PROMPT, DEMO, DEMO_TRANSCRIPT, DRIVE_AUTO_NEXT, OUTCOME, STORAGE_KEY,
-  decorate, fmtPhone, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, summarize, toProspect,
+  BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DEMO, DEMO_TRANSCRIPT, DRIVE_AUTO_NEXT, OUTCOME, STORAGE_KEY,
+  decorate, fetchAutoBrief, fmtPhone, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, summarize, toProspect,
   type BriefItem, type Line, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
@@ -12,7 +12,7 @@ type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'call' | 'wrap' | 'driv
 type Filter = 'all' | 'top' | 'new' | 'follow' | 'customer';
 interface LiveCall { start: number; secs: number; lines: Line[] }
 interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string }
-interface Brief { step: 'input' | 'review'; text: string; busy: boolean; error: string; added?: BriefItem[]; updated?: (BriefItem & { id: number })[] }
+interface Brief { step: 'input' | 'review'; text: string; busy: boolean; error: string; auto?: string; added?: BriefItem[]; updated?: (BriefItem & { id: number })[] }
 interface AddForm { company?: string; contact?: string; phone?: string; city?: string; type: string; interest: string }
 
 const loadProspects = (): Prospect[] => {
@@ -23,6 +23,7 @@ const loadProspects = (): Prospect[] => {
   return bundledProspects as Prospect[];
 };
 const readBriefAt = () => { try { return localStorage.getItem(BRIEF_AT_KEY); } catch { return null; } };
+const readSeen = () => { try { return localStorage.getItem(BRIEF_SEEN_KEY); } catch { return null; } };
 
 const whoColor = (w: string, live: boolean) => (w === 'You' ? '#C9A45C' : w === 'Them' ? (live ? '#7FB2E5' : '#9CC0EA') : (live ? '#B8AE9F' : '#A39A8C'));
 const selBg = (on: boolean) => (on ? '#C9A45C' : '#1A1815');
@@ -72,6 +73,7 @@ export default function App() {
   const [add, setAdd] = useState<AddForm | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
   const [briefAt, setBriefAt] = useState<string | null>(readBriefAt);
+  const [autoBrief, setAutoBrief] = useState<{ text: string; hash: string } | null>(null);
 
   const timer = useRef<number | undefined>(undefined);
   const demo = useRef<number | undefined>(undefined);
@@ -83,6 +85,17 @@ export default function App() {
   // First launch on this phone: save the bundled list so edits persist from here on.
   useEffect(() => { persist(prospects); }, []);
   useEffect(() => () => { clearInterval(timer.current); clearInterval(demo.current); stopRec(); }, []);
+
+  // Pick up the morning briefing that the scheduled Claude run publishes, whenever the app comes to the front.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetchAutoBrief().then(b => setAutoBrief(b && b.hash !== readSeen() ? b : null));
+    };
+    check();
+    document.addEventListener('visibilitychange', check);
+    return () => document.removeEventListener('visibilitychange', check);
+  }, []);
 
   function persist(ps: Prospect[]) {
     setProspects(ps);
@@ -181,7 +194,7 @@ export default function App() {
   };
 
   // ---- daily briefing ----
-  function processBrief() {
+  function processBrief(brief: Brief | null) {
     if (!brief || !brief.text.trim()) return;
     const first = brief.text.split(/\r?\n/)[0].toLowerCase();
     if (!(first.includes('company') && first.includes(','))) {
@@ -214,8 +227,16 @@ export default function App() {
     const fresh: Prospect[] = brief.added.map((n, i) => ({ ...n, id: now + i, status: 'new', next: null, calls: [], pinned: n.top ? now : null, addedAt: now }));
     persist([...fresh, ...ps]);
     try { localStorage.setItem(BRIEF_AT_KEY, String(now)); } catch { /* ignore */ }
+    markSeen(brief);
     setBrief(null); setBriefAt(String(now)); setFilter('all');
   }
+
+  function markSeen(b: Brief | null) {
+    if (!b?.auto) return;
+    try { localStorage.setItem(BRIEF_SEEN_KEY, b.auto); } catch { /* ignore */ }
+    setAutoBrief(null);
+  }
+  const reviewAutoBrief = () => { if (autoBrief) processBrief({ step: 'input', text: autoBrief.text, busy: false, error: '', auto: autoBrief.hash }); };
 
   const pasteBrief = () => {
     navigator.clipboard?.readText?.()
@@ -245,6 +266,15 @@ export default function App() {
         <div className="stat card"><b>{callsToday}</b><span>Calls made today</span></div>
         <div className="stat card"><b style={{ color: '#D9B872' }}>{prospects.filter(p => p.next && p.next <= today).length}</b><span>Follow-ups due</span></div>
       </div>
+      {autoBrief && (
+        <button className="btn brief-card" onClick={reviewAutoBrief} style={{ background: '#2A2316', border: '1.5px solid #C9A45C' }}>
+          <div className="col" style={{ gap: 4, minWidth: 0 }}>
+            <span style={{ font: "700 17px/1.1 'Barlow',sans-serif", color: '#E2C27F' }}>New briefing ready</span>
+            <span style={{ font: "500 13px/1.3 'Barlow',sans-serif", color: '#A39A8C' }}>This morning's new work from Claude</span>
+          </div>
+          <span className="pill" style={{ background: '#C9A45C', color: '#0E0D0B' }}>Review</span>
+        </button>
+      )}
       <div className="brief-card card">
         <div className="col" style={{ gap: 4, minWidth: 0 }}>
           <span style={{ font: "700 17px/1.1 'Barlow',sans-serif", color: '#F2EEE6' }}>Daily briefing</span>
@@ -522,7 +552,7 @@ export default function App() {
               </label>
               <textarea className="textarea" value={brief.text} onChange={e => { const v = e.target.value; setBrief(b => b && { ...b, text: v, error: '' }); }} placeholder="…or paste the daily briefing here" style={{ minHeight: 150, font: "500 15px/1.4 'Barlow',sans-serif" }} />
               {brief.error && <span style={{ font: "600 14px/1.4 'Barlow',sans-serif", color: '#F08A80' }}>{brief.error}</span>}
-              <button className="btn btn-cta" onClick={processBrief} style={{ background: brief.text.trim() ? '#C9A45C' : '#3A352E', color: '#0E0D0B' }}>Check for new work</button>
+              <button className="btn btn-cta" onClick={() => processBrief(brief)} style={{ background: brief.text.trim() ? '#C9A45C' : '#3A352E', color: '#0E0D0B' }}>Check for new work</button>
             </>
           ) : (
             <>
@@ -538,7 +568,7 @@ export default function App() {
                   <span className="muted pretty" style={{ font: "500 14px/1.4 'Barlow',sans-serif" }}>{t.lead || t.type}</span>
                 </div>
               ))}
-              <button className="btn btn-cta btn-gold" onClick={() => (changes ? applyBrief() : setBrief(null))}>{changes ? 'Add to prospect list' : 'Done'}</button>
+              <button className="btn btn-cta btn-gold" onClick={() => { if (changes) applyBrief(); else { markSeen(brief); setBrief(null); } }}>{changes ? 'Add to prospect list' : 'Done'}</button>
             </>
           )}
         </div>

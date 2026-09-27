@@ -1,5 +1,5 @@
 // Offline support: pages are network-first, everything else is cache-first.
-const CACHE = 'monarch-v1';
+const CACHE = 'monarch-v2';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./', './manifest.webmanifest', './icons/icon-192.png'])));
@@ -13,7 +13,9 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  const url = new URL(req.url);
+  // The daily briefing must always come fresh from the network.
+  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.endsWith('/briefing.csv')) return;
   if (req.mode === 'navigate') {
     e.respondWith(fetch(req).then(res => {
       const copy = res.clone();
