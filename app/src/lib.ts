@@ -197,3 +197,54 @@ export const fetchAutoBrief = async (): Promise<{ text: string; hash: string } |
     return null;
   }
 };
+
+// ---- drive route ----
+export const ROUTE_KEY = 'monarch-route';
+export const ROUTE_HOME_KEY = 'monarch-route-home';
+export const YARD = '1920 Goetz Rd, Perris, CA 92570';
+/** Google Maps on a phone takes 3 waypoints + a destination per link, so longer routes are split into legs. */
+const LEG = 4;
+
+/** What Google Maps should search for: the street address when there is one, otherwise the company name and city. */
+export const placeOf = (p: Prospect) => {
+  const a = (p.address || '').trim(), c = (p.city || '').trim();
+  if (a) {
+    let s = a;
+    if (c && !a.toLowerCase().includes(c.toLowerCase())) s += ', ' + c;
+    if (!/\bCA\b|California/i.test(s)) s += ', CA';
+    return s;
+  }
+  return [p.company, c, 'CA'].filter(Boolean).join(', ');
+};
+
+const dirURL = (origin: string, stops: string[], dest: string) => {
+  const u = new URL('https://www.google.com/maps/dir/');
+  u.searchParams.set('api', '1');
+  u.searchParams.set('origin', origin);
+  u.searchParams.set('destination', dest);
+  if (stops.length) u.searchParams.set('waypoints', stops.join('|'));
+  u.searchParams.set('travelmode', 'driving');
+  return u.toString();
+};
+
+export interface Leg { url: string; label: string }
+
+/** Google Maps links for the route, starting at the yard; each leg starts where the previous one ended. */
+export const routeLegs = (stops: Prospect[], backToYard: boolean): Leg[] => {
+  if (!stops.length) return [];
+  const pts = stops.map(placeOf);
+  if (backToYard) pts.push(YARD);
+  const legs: Leg[] = [];
+  let origin = YARD;
+  for (let i = 0; i < pts.length; i += LEG) {
+    const chunk = pts.slice(i, i + LEG);
+    const dest = chunk[chunk.length - 1];
+    const from = i + 1, to = Math.min(i + chunk.length, stops.length);
+    const home = backToYard && i + chunk.length === pts.length;
+    const range = from > to ? '' : from === to ? `stop ${from}` : `stops ${from}–${to}`;
+    legs.push({ url: dirURL(origin, chunk.slice(0, -1), dest), label: `Leg ${legs.length + 1}: ${range}${home ? (range ? ' + ' : '') + 'back to yard' : ''}` });
+    origin = dest;
+  }
+  if (legs.length === 1) legs[0].label = `Open route in Google Maps (${stops.length} stop${stops.length > 1 ? 's' : ''})`;
+  return legs;
+};
