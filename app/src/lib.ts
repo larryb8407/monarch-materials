@@ -1,7 +1,7 @@
 export type Who = 'You' | 'Them' | 'Call';
 export interface Line { who: Who; text: string }
 export type OutcomeKey = 'interested' | 'callback' | 'notnow' | 'won' | 'none';
-export interface Call { at: number; secs: number; outcome: OutcomeKey; summary: string; lines: Line[] }
+export interface Call { id?: number; at: number; secs: number; outcome: OutcomeKey; summary: string; lines: Line[]; by?: string }
 export type StatusKey = 'new' | 'follow' | 'interested' | 'customer' | 'notnow';
 
 export interface Prospect {

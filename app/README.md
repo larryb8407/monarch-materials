@@ -28,3 +28,19 @@ On a desktop browser, tapping Call plays a scripted demo conversation instead of
 - **Transcription** uses Chrome's speech recognition on the mic. Put the call on speaker and tap Transcribe. Android may pause the mic while the dialer is in front. Samsung's built-in call recording and transcripts are the reliable backup.
 - **Daily briefing**: "Ask Claude for today's briefing" opens Claude with a prompt that returns CSV. Paste or upload it; companies are matched by name, new ones are added, and top-priority ones are pinned to the top of the queue with a "New top lead" tag until they're called. Only CSV is accepted here (the design's free-text AI parsing and AI call summaries relied on the Claude Design runtime, which isn't available on the phone). Call summaries use the built-in key-line extractor.
 - **Automatic morning briefing**: a scheduled Claude run writes `app/public/briefing.csv` (same CSV format) and pushes it to `main`; Netlify publishes it. Each time the app comes to the front it fetches `briefing.csv` (never cached). If the file is new, Today shows a "New briefing ready" card that opens the usual review step. Once the briefing is added (or found to have nothing new), it isn't offered again.
+
+## Team mode (shared list with sign-in)
+
+With `src/config.ts` empty the app runs on one phone with no sign-in. To share one list with employees:
+
+1. Create a free project at https://supabase.com.
+2. SQL Editor → New query → paste `supabase/setup.sql` → Run. It creates the tables, access rules, and adds the owner (larryb8407@gmail.com).
+3. Authentication → Sign In / Providers → Email: turn **off** "Confirm email" (only emails on the team list can sign up anyway).
+4. Project Settings → API: put the Project URL and the `anon` public key into `src/config.ts`, commit, push.
+
+How it works:
+- Only emails in the `team` table can create an account or read anything. The owner adds/removes people under the name menu (top right) → Team; removal cuts access immediately.
+- Everyone sees and can add/edit all prospects and all calls; each call records who made it. Only the owner sees the daily briefing / Update list.
+- Every change is saved on the phone first and queued (`monarch-outbox`), then uploaded when there is signal. The header shows "N unsent" while changes are waiting.
+- On the owner's first sign-in, if the team list is empty, the list on that phone (with its call history) is uploaded as the starting team list.
+- The drive route stays per phone.

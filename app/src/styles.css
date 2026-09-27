@@ -157,3 +157,8 @@ h1, h2, p { margin: 0; }
 .brief-stat { border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 2px; }
 .brief-stat b { font: 700 28px/1 var(--cond); color: var(--text); }
 .brief-stat span { font: 500 13px var(--sans); color: var(--muted); }
+
+/* Team sign-in */
+.signin { flex: 1; overflow-y: auto; padding: 32px 22px; display: flex; flex-direction: column; gap: 14px; }
+.signin h1 { font: 700 34px/1.05 var(--cond); }
+.signin p { font: 500 16px/1.45 var(--sans); }

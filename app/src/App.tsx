@@ -5,6 +5,7 @@ import {
   type BriefItem, type Line, type StatusKey, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
+import { addMember, cloudEnabled, diffOps, enqueue, flush, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
 import bundledProspects from './prospects.json';
 import logoUrl from './monarch-logo.webp';
 
@@ -84,6 +85,15 @@ export default function App() {
   const [candCity, setCandCity] = useState('');
   const [candMin, setCandMin] = useState(70);
   const [autoBrief, setAutoBrief] = useState<{ text: string; hash: string } | null>(null);
+  // Team sign-in (only when a Supabase project is configured).
+  const [authReady, setAuthReady] = useState(!cloudEnabled);
+  const [email, setEmail] = useState<string | null>(null);
+  const [me, setMe] = useState<Member | null>(null);
+  const [meChecked, setMeChecked] = useState(false);
+  const [pending, setPending] = useState(0);
+  const [syncError, setSyncError] = useState('');
+  const [account, setAccount] = useState(false);
+  const [team, setTeam] = useState<Member[] | null>(null);
 
   const timer = useRef<number | undefined>(undefined);
   const demo = useRef<number | undefined>(undefined);
@@ -92,8 +102,68 @@ export default function App() {
   const driveIdxRef = useRef(0);
   driveIdxRef.current = driveIdx;
 
+  const prospectsRef = useRef(prospects);
+  const meRef = useRef<Member | null>(null);
+  meRef.current = me;
+  const isOwner = !cloudEnabled || me?.role === 'owner';
+
   // First launch on this phone: save the bundled list so edits persist from here on.
-  useEffect(() => { persist(prospects); }, []);
+  useEffect(() => { if (!cloudEnabled) persist(prospects); }, []);
+
+  // ---- team sign-in and sync ----
+  useEffect(() => {
+    if (!cloudEnabled) return;
+    getSession().then(s => { setEmail(s?.user.email || null); setAuthReady(true); });
+    const sub = onAuth(s => setEmail(s?.user.email || null));
+    return () => sub?.unsubscribe();
+  }, []);
+
+  function showServerList(list: Prospect[]) {
+    prospectsRef.current = list;
+    setProspects(list);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+  }
+
+  async function sync() {
+    if (!meRef.current) return;
+    const err = await flush();
+    setPending(pendingCount());
+    if (err) setSyncError(err);
+    try { showServerList(await loadTeamList()); } catch { /* offline: keep the on-phone copy */ }
+  }
+
+  useEffect(() => {
+    if (!cloudEnabled) return;
+    if (!email) { setMe(null); setMeChecked(false); return; }
+    let live = true;
+    (async () => {
+      const m = await loadMe(email).catch(() => null);
+      if (!live) return;
+      setMe(m); meRef.current = m; setMeChecked(true);
+      if (!m) return;
+      try {
+        const list = await loadTeamList();
+        if (!list.length && m.role === 'owner') {
+          // First owner sign-in: the list on this phone (with its call history) becomes the team list.
+          const local = loadProspects();
+          enqueue(diffOps([], local, m.name));
+          showServerList(local);
+          await flush();
+          setPending(pendingCount());
+        } else showServerList(list);
+      } catch { /* offline: keep the on-phone copy until the next sync */ }
+    })();
+    return () => { live = false; };
+  }, [email]);
+
+  useEffect(() => {
+    if (!cloudEnabled) return;
+    const onShow = () => { if (document.visibilityState === 'visible') sync(); };
+    document.addEventListener('visibilitychange', onShow);
+    window.addEventListener('online', onShow);
+    const every = window.setInterval(onShow, 60000);
+    return () => { document.removeEventListener('visibilitychange', onShow); window.removeEventListener('online', onShow); clearInterval(every); };
+  }, []);
   useEffect(() => () => { clearInterval(timer.current); clearInterval(demo.current); stopRec(); }, []);
 
   // Pick up the morning briefing that the scheduled Claude run publishes, whenever the app comes to the front.
@@ -107,7 +177,18 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', check);
   }, []);
 
+  // Owner's Team list: (re)load whenever the account sheet is open and the list was reset.
+  useEffect(() => {
+    if (account && me?.role === 'owner' && team === null) loadTeam().then(setTeam).catch(() => setSyncError('Could not load the team. Check your connection.'));
+  }, [account, me, team]);
+
   function persist(ps: Prospect[]) {
+    if (cloudEnabled && meRef.current) {
+      enqueue(diffOps(prospectsRef.current, ps, meRef.current.name));
+      setPending(pendingCount());
+      flush().then(err => { setPending(pendingCount()); if (err) setSyncError(err); });
+    }
+    prospectsRef.current = ps;
     setProspects(ps);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ps)); } catch { /* storage full or blocked */ }
   }
@@ -122,7 +203,7 @@ export default function App() {
   const queue = queueList(prospects);
   const today = rel(0);
   const T0 = startOfToday();
-  const callsToday = prospects.reduce((n, p) => n + p.calls.filter(c => c.at >= T0).length, 0);
+  const callsToday = prospects.reduce((n, p) => n + p.calls.filter(c => c.at >= T0 && (isOwner || c.by === me?.name)).length, 0);
 
   const open = (id: number) => { setActiveId(id); setPrev(screen); setScreen('detail'); setOpenCall(null); };
   const leaveDetail = () => setScreen(prev === 'detail' ? 'today' : prev);
@@ -176,7 +257,7 @@ export default function App() {
       ...p, pinned: null,
       status: OUTCOME[oc].status || ((wrap.follow ?? 0) > 0 ? 'follow' : p.status),
       next: next === undefined ? (p.next && p.next <= today ? null : p.next) : next,
-      calls: [{ at: call.start, secs: call.secs, outcome: oc, summary, lines: call.lines }, ...p.calls],
+      calls: [{ id: call.start * 1000 + Math.floor(Math.random() * 1000), at: call.start, secs: call.secs, outcome: oc, summary, lines: call.lines, by: me?.name }, ...p.calls],
     }));
     const fromDrive = prev === 'drive' || wasDrive.current;
     setWrap(null); setCall(null); setDictating(false);
@@ -279,10 +360,10 @@ export default function App() {
         <h1>{queue.length} calls in today's queue</h1>
       </div>
       <div className="grid2">
-        <div className="stat card"><b>{callsToday}</b><span>Calls made today</span></div>
+        <div className="stat card"><b>{callsToday}</b><span>{cloudEnabled && isOwner ? 'Team calls today' : 'Calls made today'}</span></div>
         <div className="stat card"><b style={{ color: '#D9B872' }}>{prospects.filter(p => p.next && p.next <= today).length}</b><span>Follow-ups due</span></div>
       </div>
-      {autoBrief && (
+      {isOwner && autoBrief && (
         <button className="btn brief-card" onClick={reviewAutoBrief} style={{ background: '#2A2316', border: '1.5px solid #C9A45C' }}>
           <div className="col" style={{ gap: 4, minWidth: 0 }}>
             <span style={{ font: "700 17px/1.1 'Barlow',sans-serif", color: '#E2C27F' }}>New briefing ready</span>
@@ -291,19 +372,21 @@ export default function App() {
           <span className="pill" style={{ background: '#C9A45C', color: '#0E0D0B' }}>Review</span>
         </button>
       )}
-      <div className="brief-card card">
-        <div className="col" style={{ gap: 4, minWidth: 0 }}>
-          <span style={{ font: "700 17px/1.1 'Barlow',sans-serif", color: '#F2EEE6' }}>Daily briefing</span>
-          <span className="muted" style={{ font: "500 13px/1.3 'Barlow',sans-serif" }}>{briefLabel} · {prospects.length} prospects</span>
+      {isOwner && (
+        <div className="brief-card card">
+          <div className="col" style={{ gap: 4, minWidth: 0 }}>
+            <span style={{ font: "700 17px/1.1 'Barlow',sans-serif", color: '#F2EEE6' }}>Daily briefing</span>
+            <span className="muted" style={{ font: "500 13px/1.3 'Barlow',sans-serif" }}>{briefLabel} · {prospects.length} prospects</span>
+          </div>
+          <button className="btn pill" onClick={openBrief}>Update list</button>
         </div>
-        <button className="btn pill" onClick={openBrief}>Update list</button>
-      </div>
+      )}
       {!prospects.length && (
         <div className="empty-card card">
           <span style={{ font: "700 22px/1.1 'Barlow Condensed',sans-serif", color: '#F2EEE6' }}>Add your first prospect</span>
           <span className="muted pretty" style={{ font: "500 15px/1.4 'Barlow',sans-serif" }}>Enter company, contact, phone, type and materials. They'll show up here as your call queue.</span>
           <button className="btn btn-gold" onClick={openAdd} style={{ height: 58, borderRadius: 16, font: "800 22px/1 'Barlow Condensed',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase' }}>+ Add prospect</button>
-          <button className="btn" onClick={() => persist(seedProspects())} style={{ height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "600 14px 'Barlow',sans-serif", color: '#D9B872' }}>Load sample prospects to try it out</button>
+          {!cloudEnabled && <button className="btn" onClick={() => persist(seedProspects())} style={{ height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "600 14px 'Barlow',sans-serif", color: '#D9B872' }}>Load sample prospects to try it out</button>}
         </div>
       )}
       <button className="btn drive-cta" onClick={startDrive}>
@@ -327,7 +410,7 @@ export default function App() {
     <div className="prospects">
       <div className="between" style={{ gap: 10 }}>
         <span className="muted" style={{ font: "500 14px/1.3 'Barlow',sans-serif" }}>{prospects.length} prospects · {briefLabel}</span>
-        <button className="btn pill" onClick={openBrief} style={{ height: 44, padding: '0 16px', borderRadius: 22, fontSize: 14 }}>Update list</button>
+        {isOwner && <button className="btn pill" onClick={openBrief} style={{ height: 44, padding: '0 16px', borderRadius: 22, fontSize: 14 }}>Update list</button>}
       </div>
       <input className="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company, contact, city" />
       <div className="filters">
@@ -364,7 +447,7 @@ export default function App() {
           <Chip bg={d.chipBg} fg={d.chipFg} label={d.statusLabel} />
           <h1>{cur.company}</h1>
           <span style={{ font: "500 17px/1.3 'Barlow',sans-serif", color: '#CFC8BC' }}>{d.contact} · {d.phoneFmt}</span>
-          <span className="muted" style={{ font: "500 15px/1.3 'Barlow',sans-serif" }}>{cur.type} · {cur.city} · {cur.interest}</span>
+          <span className="muted" style={{ font: "500 15px/1.3 'Barlow',sans-serif" }}>{[cur.type, cur.city, cur.interest].filter(Boolean).join(' · ')}</span>
           {cur.top && <span style={{ font: "700 13px/1.3 'Barlow',sans-serif", color: '#C9A45C', letterSpacing: '.04em', textTransform: 'uppercase' }}>Top priority · {d.sizeLabel}</span>}
         </div>
         {cur.lead && <div className="info-card card"><span className="t" style={{ color: '#C9A45C' }}>Why call</span><span className="b">{cur.lead}</span></div>}
@@ -394,7 +477,7 @@ export default function App() {
             return (
               <div key={c.at} className="history card">
                 <div className="between" style={{ gap: 8 }}>
-                  <span className="muted" style={{ font: "600 14px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}</span>
+                  <span className="muted" style={{ font: "600 14px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''}</span>
                   <Chip bg={o.bg} fg={o.fg} label={o.label} />
                 </div>
                 <p className="pretty" style={{ font: "500 16px/1.4 'Barlow',sans-serif" }}>{c.summary}</p>
@@ -427,7 +510,7 @@ export default function App() {
               <span style={{ font: "700 17px/1.2 'Barlow',sans-serif" }}>{c.company}</span>
               <span className="chip" style={{ flex: 'none', background: o.bg, color: o.fg }}>{o.label}</span>
             </div>
-            <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)} · {c.lines.length} transcript lines</span>
+            <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''} · {c.lines.length} transcript lines</span>
             <span className="pretty" style={{ font: "500 15px/1.4 'Barlow',sans-serif", color: '#CFC8BC' }}>{c.summary}</span>
           </button>
         );
@@ -676,7 +759,7 @@ export default function App() {
     const fields: [keyof AddForm, string, string, string][] = [['company', 'Company', 'text', 'e.g. Perris Valley Grading'], ['contact', 'Contact name', 'text', 'First and last'], ['phone', 'Phone', 'tel', '(951) 555-0100'], ['city', 'City', 'text', 'e.g. Menifee']];
     const save = () => {
       if (!canSave) return;
-      persist([{ id: Date.now(), company: add.company!, contact: add.contact || 'Unknown', phone: add.phone!.replace(/\D/g, ''), type: add.type || 'Hauler', city: add.city || '', interest: add.interest || 'Both', status: 'new', next: null, calls: [] }, ...prospects]);
+      persist([{ id: Date.now(), company: add.company!, contact: (add.contact || '').trim(), phone: add.phone!.replace(/\D/g, ''), type: add.type || 'Hauler', city: add.city || '', interest: add.interest || 'Both', status: 'new', next: null, calls: [] }, ...prospects]);
       setAdd(null);
     };
     const opts = (list: string[], k: 'type' | 'interest') => (
@@ -757,6 +840,43 @@ export default function App() {
     );
   };
 
+  const renderAccount = () => {
+    if (!account || !me) return null;
+    return (
+      <div className="scrim" style={{ background: 'rgba(15,13,10,.55)' }}>
+        <div className="sheet" style={{ gap: 12, maxHeight: '92%' }}>
+          <div className="between">
+            <h2>{me.name || 'Account'}</h2>
+            <button className="btn sheet-close" onClick={() => { setAccount(false); setSyncError(''); }}>Close</button>
+          </div>
+          <span className="muted" style={{ font: "500 15px/1.4 'Barlow',sans-serif" }}>Signed in as {me.email} · {me.role === 'owner' ? 'Owner' : 'Team member'}</span>
+          <div className="info-card card">
+            <span className="t muted">Sync</span>
+            <span className="b">{pending ? `${pending} change${pending > 1 ? 's' : ''} waiting for signal. They upload automatically.` : 'Everything is saved to the team list.'}</span>
+            {syncError && <span style={{ font: "600 14px/1.4 'Barlow',sans-serif", color: '#F08A80' }}>Last error: {syncError}</span>}
+            <button className="btn link-btn" onClick={() => sync()} style={{ alignSelf: 'flex-start' }}>Sync now</button>
+          </div>
+          {me.role === 'owner' && <TeamManager team={team} me={me} onChanged={() => setTeam(null)} />}
+          <button className="btn btn-outline" onClick={() => { setAccount(false); setTeam(null); signOut(); }} style={{ height: 52, borderRadius: 14, borderColor: '#3A352E', color: '#F08A80' }}>Sign out</button>
+        </div>
+      </div>
+    );
+  };
+
+  if (cloudEnabled && (!authReady || (email && !meChecked))) {
+    return <div className="app"><div className="col" style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><span className="muted">Loading…</span></div></div>;
+  }
+  if (cloudEnabled && !email) return <SignIn />;
+  if (cloudEnabled && !me) {
+    return (
+      <div className="app"><div className="signin">
+        <h1>Not on the team yet</h1>
+        <p className="muted pretty">{email} isn't on the Monarch Materials team list. Ask Larry to add you, then sign in again.</p>
+        <button className="btn btn-cta btn-gold" onClick={() => signOut()}>Sign out</button>
+      </div></div>
+    );
+  }
+
   const tabs: [Screen, string][] = [['today', 'Today'], ['prospects', 'Prospects'], ['route', 'Route'], ['log', 'Call log'], ['drive', 'Drive']];
 
   return (
@@ -768,7 +888,11 @@ export default function App() {
               ? <div className="wordmark"><b>MONARCH</b><span>MATERIALS</span></div>
               : <img src={logoUrl} alt="Monarch Materials" onError={() => setLogoFailed(true)} />}
           </div>
-          <span className="header-label">{screen === 'log' ? 'Call log' : screen === 'route' ? 'Drive route' : 'Prospecting'}</span>
+          {cloudEnabled && me
+            ? <button className="btn header-label" onClick={() => setAccount(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 40 }}>
+                {pending > 0 && <span style={{ color: '#B5651D' }}>{pending} unsent ·</span>}{me.name || me.email.split('@')[0]} ▾
+              </button>
+            : <span className="header-label">{screen === 'log' ? 'Call log' : screen === 'route' ? 'Drive route' : 'Prospecting'}</span>}
         </header>
       )}
       <main className="main">
@@ -793,6 +917,75 @@ export default function App() {
       {renderBrief()}
       {renderAdd()}
       {renderEdit()}
+      {renderAccount()}
     </div>
+  );
+}
+
+function SignIn() {
+  const [create, setCreate] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const submit = async () => {
+    if (!email.trim() || !password) { setMsg('Enter your email and password.'); return; }
+    setBusy(true); setMsg('');
+    const err = await signIn(email, password, create);
+    setBusy(false);
+    if (err) setMsg(err);
+  };
+  return (
+    <div className="app">
+      <header className="header"><img src={logoUrl} alt="Monarch Materials" /><span className="header-label">Team sign-in</span></header>
+      <div className="signin">
+        <h1>{create ? 'Set your password' : 'Sign in'}</h1>
+        <p className="muted pretty">{create ? 'First time here? Use the email Larry added to the team and pick a password.' : 'Use the email and password you set up for Monarch Materials.'}</p>
+        <label className="field">Email<input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" /></label>
+        <label className="field">Password<input type="password" autoComplete={create ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); }} placeholder={create ? 'At least 6 characters' : ''} /></label>
+        {msg && <span style={{ font: "600 15px/1.4 'Barlow',sans-serif", color: '#F08A80' }}>{msg}</span>}
+        <button className="btn btn-cta btn-gold" onClick={submit}>{busy ? 'One moment…' : create ? 'Create password' : 'Sign in'}</button>
+        <button className="btn link-btn" onClick={() => { setCreate(!create); setMsg(''); }} style={{ alignSelf: 'center', fontSize: 15 }}>
+          {create ? 'Already set a password? Sign in' : 'First time? Set your password'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TeamManager({ team, me, onChanged }: { team: Member[] | null; me: Member; onChanged: () => void }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [msg, setMsg] = useState('');
+  const add = async () => {
+    if (!name.trim() || !/^\S+@\S+\.\S+$/.test(email.trim())) { setMsg('Enter their name and a valid email.'); return; }
+    const err = await addMember(name, email);
+    if (err) { setMsg(err); return; }
+    setMsg(`${name.trim()} added. Tell them to open the app, tap "First time? Set your password" and use ${email.trim().toLowerCase()}.`);
+    setName(''); setEmail(''); onChanged();
+  };
+  const remove = async (m: Member) => {
+    if (!window.confirm(`Remove ${m.name || m.email}? They lose access right away.`)) return;
+    const err = await removeMember(m.email);
+    setMsg(err || `${m.name || m.email} removed.`); onChanged();
+  };
+  return (
+    <>
+      <h2 className="h-section" style={{ marginTop: 6 }}>Team</h2>
+      {team === null ? <span className="muted">Loading…</span> : team.map(m => (
+        <div key={m.email} className="stop card">
+          <div className="col" style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <span style={{ font: "700 16px 'Barlow',sans-serif" }}>{m.name || m.email}{m.role === 'owner' ? ' · Owner' : ''}</span>
+            <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif", overflowWrap: 'anywhere' }}>{m.email}</span>
+          </div>
+          {m.email !== me.email && <button className="btn" onClick={() => remove(m)} style={{ font: "600 14px 'Barlow',sans-serif", color: '#F08A80', padding: '8px 4px' }}>Remove</button>}
+        </div>
+      ))}
+      <span className="field" style={{ marginTop: 4 }}>Add an employee</span>
+      <label className="field">Name<input value={name} onChange={e => setName(e.target.value)} placeholder="First and last" /></label>
+      <label className="field">Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="them@example.com" /></label>
+      {msg && <span className="pretty" style={{ font: "600 14px/1.4 'Barlow',sans-serif", color: '#E2C27F' }}>{msg}</span>}
+      <button className="btn btn-cta btn-gold" onClick={add}>Add to team</button>
+    </>
   );
 }
