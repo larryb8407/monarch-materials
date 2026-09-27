@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E0D0B">
+<meta name="mobile-web-app-capable" content="yes">
+<script src="./prospects.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;background:#2A251E;height:100%}
+body{font-family:'Barlow',system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+a{color:#C9A45C}a:hover{color:#D9B872}
+input,textarea,button{font-family:inherit}
+@keyframes mmPulse{0%{box-shadow:0 0 0 0 rgba(201,164,92,.55)}70%{box-shadow:0 0 0 28px rgba(201,164,92,0)}100%{box-shadow:0 0 0 0 rgba(201,164,92,0)}}
+@keyframes mmRec{0%,100%{opacity:1}50%{opacity:.3}}
+</style>
+</helmet>
+<div style="width:100%;max-width:430px;height:100dvh;max-height:920px;margin:0 auto;position:relative;overflow:hidden;background:#0E0D0B;color:#F2EEE6;display:flex;flex-direction:column">
+
+<sc-if value="{{ showChrome }}" hint-placeholder-val="{{ true }}">
+<header style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px 10px;background:#FAF8F4;color:#17140F;border-bottom:3px solid #C9A45C">
+  <div style="display:flex;align-items:center;gap:10px;min-width:0">
+    <sc-if value="{{ logoOk }}" hint-placeholder-val="{{ true }}">
+      <img src="./assets/monarch-logo.webp" alt="Monarch Materials" onError="{{ onLogoError }}" style="height:34px;width:auto;max-width:190px;object-fit:contain;display:block">
+    </sc-if>
+    <sc-if value="{{ logoFailed }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;line-height:1">
+        <span style="font:800 21px/1 'Barlow Condensed',sans-serif;letter-spacing:.04em;color:#17140F">MONARCH</span>
+        <span style="font:700 11px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.28em;color:#8A6F3A">MATERIALS</span>
+      </div>
+    </sc-if>
+  </div>
+  <span style="font:600 12px/1 'Barlow',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#6B645A">{{ headerLabel }}</span>
+</header>
+</sc-if>
+
+<main style="flex:1;min-height:0;overflow-y:auto;position:relative">
+
+<sc-if value="{{ isToday }}" hint-placeholder-val="{{ true }}">
+<div style="padding:20px 18px 28px;display:flex;flex-direction:column;gap:18px">
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <span style="font:600 13px/1 'Barlow',sans-serif;color:#A39A8C;text-transform:uppercase;letter-spacing:.08em">{{ todayLabel }}</span>
+    <h1 style="margin:0;font:700 34px/1.05 'Barlow Condensed',sans-serif;letter-spacing:.01em">{{ queueCount }} calls in today's queue</h1>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:2px">
+      <span style="font:700 30px/1 'Barlow Condensed',sans-serif">{{ callsToday }}</span>
+      <span style="font:500 13px/1.2 'Barlow',sans-serif;color:#A39A8C">Calls made today</span>
+    </div>
+    <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:2px">
+      <span style="font:700 30px/1 'Barlow Condensed',sans-serif;color:#D9B872">{{ dueCount }}</span>
+      <span style="font:500 13px/1.2 'Barlow',sans-serif;color:#A39A8C">Follow-ups due</span>
+    </div>
+  </div>
+  <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:16px;padding:14px 14px 14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+      <span style="font:700 17px/1.1 'Barlow',sans-serif;color:#F2EEE6">Daily briefing</span>
+      <span style="font:500 13px/1.3 'Barlow',sans-serif;color:#A39A8C">{{ briefLabel }} · {{ totalCount }} prospects</span>
+    </div>
+    <button onClick="{{ openBrief }}" style="all:unset;cursor:pointer;flex:none;height:48px;padding:0 18px;border-radius:24px;border:1.5px solid #C9A45C;color:#C9A45C;display:flex;align-items:center;font:700 15px 'Barlow',sans-serif">Update list</button>
+  </div>
+  <sc-if value="{{ noProspects }}" hint-placeholder-val="{{ false }}">
+    <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:18px;padding:22px 20px;display:flex;flex-direction:column;gap:12px">
+      <span style="font:700 22px/1.1 'Barlow Condensed',sans-serif;color:#F2EEE6">Add your first prospect</span>
+      <span style="font:500 15px/1.4 'Barlow',sans-serif;color:#A39A8C;text-wrap:pretty">Enter company, contact, phone, type and materials. They'll show up here as your call queue.</span>
+      <button onClick="{{ openAdd }}" style="all:unset;cursor:pointer;height:58px;border-radius:16px;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:800 22px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase">+ Add prospect</button>
+      <button onClick="{{ loadSamples }}" style="all:unset;cursor:pointer;height:44px;display:flex;align-items:center;justify-content:center;font:600 14px 'Barlow',sans-serif;color:#D9B872">Load sample prospects to try it out</button>
+    </div>
+  </sc-if>
+  <button onClick="{{ startDrive }}" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:14px;background:#C9A45C;color:#0E0D0B;border-radius:18px;padding:20px 22px;min-height:64px" style-active="transform:scale(.98)">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span style="font:800 28px/1 'Barlow Condensed',sans-serif;letter-spacing:.02em;text-transform:uppercase">Start Drive Mode</span>
+      <span style="font:500 15px/1.2 'Barlow',sans-serif">Big buttons, voice commands, auto next call</span>
+    </div>
+    <div style="flex:none;width:52px;height:52px;border-radius:50%;background:#0E0D0B;color:#C9A45C;display:flex;align-items:center;justify-content:center;font:800 26px/1 'Barlow Condensed',sans-serif">→</div>
+  </button>
+  <div style="display:flex;align-items:baseline;justify-content:space-between">
+    <h2 style="margin:0;font:700 20px/1 'Barlow Condensed',sans-serif;text-transform:uppercase;letter-spacing:.04em">Up next</h2>
+    <button onClick="{{ goProspects }}" style="all:unset;cursor:pointer;font:600 14px/1 'Barlow',sans-serif;color:#D9B872;padding:8px 0">All prospects</button>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <sc-for list="{{ queue }}" as="p" hint-placeholder-count="4">
+      <div style="display:flex;align-items:center;gap:12px;background:#1A1815;border:1px solid #2E2A24;border-radius:16px;padding:12px 12px 12px 16px">
+        <button onClick="{{ p.onOpen }}" style="all:unset;cursor:pointer;flex:1;min-width:0;display:flex;flex-direction:column;gap:5px">
+          <span style="font:700 18px/1.15 'Barlow',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.company }}</span>
+          <span style="font:500 14px/1.2 'Barlow',sans-serif;color:#A39A8C">{{ p.contact }} · {{ p.city }}</span>
+          <span style="align-self:flex-start;font:700 11px/1 'Barlow',sans-serif;letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:{{ p.chipBg }};color:{{ p.chipFg }}">{{ p.statusLabel }}</span>
+        </button>
+        <button onClick="{{ p.onCall }}" aria-label="Call" style="all:unset;cursor:pointer;flex:none;width:58px;height:58px;border-radius:50%;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:800 13px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em" style-active="transform:scale(.94)">CALL</button>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isProspects }}" hint-placeholder-val="{{ false }}">
+<div style="padding:18px 18px 100px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <span style="font:500 14px/1.3 'Barlow',sans-serif;color:#A39A8C">{{ totalCount }} prospects · {{ briefLabel }}</span>
+    <button onClick="{{ openBrief }}" style="all:unset;cursor:pointer;flex:none;height:44px;padding:0 16px;border-radius:22px;border:1.5px solid #C9A45C;color:#C9A45C;display:flex;align-items:center;font:700 14px 'Barlow',sans-serif">Update list</button>
+  </div>
+  <input value="{{ search }}" onChange="{{ onSearch }}" placeholder="Search company, contact, city" style="width:100%;box-sizing:border-box;height:52px;border-radius:14px;border:1px solid #2E2A24;background:#1A1815;padding:0 16px;font:500 17px 'Barlow',sans-serif;color:#F2EEE6;outline:none">
+  <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:2px">
+    <sc-for list="{{ filters }}" as="f" hint-placeholder-count="4">
+      <button onClick="{{ f.onPick }}" style="all:unset;cursor:pointer;flex:none;height:40px;padding:0 16px;border-radius:20px;display:flex;align-items:center;font:600 14px 'Barlow',sans-serif;background:{{ f.bg }};color:{{ f.fg }};border:1px solid #3A352E">{{ f.label }} · {{ f.count }}</button>
+    </sc-for>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <sc-for list="{{ prospectList }}" as="p" hint-placeholder-count="6">
+      <div style="display:flex;align-items:center;gap:12px;background:#1A1815;border:1px solid #2E2A24;border-radius:16px;padding:12px 12px 12px 16px">
+        <button onClick="{{ p.onOpen }}" style="all:unset;cursor:pointer;flex:1;min-width:0;display:flex;flex-direction:column;gap:5px">
+          <span style="font:700 17px/1.15 'Barlow',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.company }}</span>
+          <span style="font:500 14px/1.2 'Barlow',sans-serif;color:#A39A8C">{{ p.contact }} · {{ p.type }} · {{ p.city }}</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font:700 11px/1 'Barlow',sans-serif;letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:{{ p.chipBg }};color:{{ p.chipFg }}">{{ p.statusLabel }}</span>
+            <span style="font:500 12px/1 'Barlow',sans-serif;color:#8A8276">{{ p.lastLabel }}</span>
+          </div>
+        </button>
+        <button onClick="{{ p.onCall }}" aria-label="Call" style="all:unset;cursor:pointer;flex:none;width:54px;height:54px;border-radius:50%;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:800 13px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em">CALL</button>
+      </div>
+    </sc-for>
+    <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+      <p style="margin:24px 0;text-align:center;font:500 15px 'Barlow',sans-serif;color:#A39A8C">No prospects match.</p>
+    </sc-if>
+  </div>
+  <button onClick="{{ openAdd }}" style="all:unset;cursor:pointer;position:absolute;right:18px;bottom:18px;height:56px;padding:0 22px;border-radius:28px;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;gap:8px;font:800 18px/1 'Barlow Condensed',sans-serif;letter-spacing:.04em;text-transform:uppercase;box-shadow:0 6px 18px rgba(0,0,0,.2)">+ Add prospect</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+<div style="padding:12px 18px 28px;display:flex;flex-direction:column;gap:16px">
+  <button onClick="{{ goBack }}" style="all:unset;cursor:pointer;align-self:flex-start;height:44px;display:flex;align-items:center;font:600 15px 'Barlow',sans-serif;color:#A39A8C">← Back</button>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <span style="align-self:flex-start;font:700 11px/1 'Barlow',sans-serif;letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:{{ cur.chipBg }};color:{{ cur.chipFg }}">{{ cur.statusLabel }}</span>
+    <h1 style="margin:0;font:700 34px/1.05 'Barlow Condensed',sans-serif">{{ cur.company }}</h1>
+    <span style="font:500 17px/1.3 'Barlow',sans-serif;color:#CFC8BC">{{ cur.contact }} · {{ cur.phoneFmt }}</span>
+    <span style="font:500 15px/1.3 'Barlow',sans-serif;color:#A39A8C">{{ cur.type }} · {{ cur.city }} · {{ cur.interest }}</span>
+    <sc-if value="{{ cur.isTop }}" hint-placeholder-val="{{ false }}">
+      <span style="font:700 13px/1.3 'Barlow',sans-serif;color:#C9A45C;letter-spacing:.04em;text-transform:uppercase">{{ cur.topLabel }} · {{ cur.sizeLabel }}</span>
+    </sc-if>
+  </div>
+  <sc-if value="{{ cur.hasLead }}" hint-placeholder-val="{{ false }}">
+    <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+      <span style="font:700 12px/1 'Barlow',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#C9A45C">Why call</span>
+      <span style="font:500 16px/1.45 'Barlow',sans-serif;color:#F2EEE6;text-wrap:pretty">{{ cur.lead }}</span>
+    </div>
+  </sc-if>
+  <sc-if value="{{ cur.hasNotes }}" hint-placeholder-val="{{ false }}">
+    <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+      <span style="font:700 12px/1 'Barlow',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#A39A8C">Notes</span>
+      <span style="font:500 16px/1.45 'Barlow',sans-serif;color:#F2EEE6;text-wrap:pretty">{{ cur.notes }}</span>
+    </div>
+  </sc-if>
+  <button onClick="{{ callCurrent }}" style="all:unset;cursor:pointer;height:68px;border-radius:18px;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:800 26px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase" style-active="transform:scale(.98)">{{ cur.callLabel }}</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <a href="{{ cur.smsHref }}" style="height:52px;border-radius:14px;border:1.5px solid #C9A45C;color:#C9A45C;display:flex;align-items:center;justify-content:center;font:700 15px 'Barlow',sans-serif;text-decoration:none">Text pricing link</a>
+    <a href="{{ cur.mapHref }}" target="_blank" style="height:52px;border-radius:14px;border:1.5px solid #C9A45C;color:#C9A45C;display:flex;align-items:center;justify-content:center;font:700 15px 'Barlow',sans-serif;text-decoration:none">Directions</a>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <sc-if value="{{ cur.hasEmail }}" hint-placeholder-val="{{ false }}">
+      <a href="{{ cur.emailHref }}" style="font:600 15px/1.4 'Barlow',sans-serif;color:#D9B872;word-break:break-all">{{ cur.email }}</a>
+    </sc-if>
+    <sc-if value="{{ cur.hasAddress }}" hint-placeholder-val="{{ false }}">
+      <span style="font:500 15px/1.4 'Barlow',sans-serif;color:#A39A8C">{{ cur.address }}</span>
+    </sc-if>
+  </div>
+  <sc-if value="{{ cur.hasFollow }}" hint-placeholder-val="{{ false }}">
+    <div style="background:#2A2316;border-radius:14px;padding:14px 16px;font:600 15px/1.35 'Barlow',sans-serif;color:#E2C27F">Follow up {{ cur.followLabel }}</div>
+  </sc-if>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+    <h2 style="margin:0;font:700 20px/1 'Barlow Condensed',sans-serif;text-transform:uppercase;letter-spacing:.04em">Call history</h2>
+    <button onClick="{{ deleteCurrent }}" style="all:unset;cursor:pointer;height:40px;padding:0 4px;display:flex;align-items:center;font:600 14px 'Barlow',sans-serif;color:#F08A80">Delete prospect</button>
+  </div>
+  <sc-if value="{{ cur.noCalls }}" hint-placeholder-val="{{ false }}">
+    <p style="margin:0;font:500 15px 'Barlow',sans-serif;color:#A39A8C">No calls yet.</p>
+  </sc-if>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <sc-for list="{{ curCalls }}" as="c" hint-placeholder-count="2">
+      <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span style="font:600 14px 'Barlow',sans-serif;color:#A39A8C">{{ c.when }} · {{ c.dur }}</span>
+          <span style="font:700 11px/1 'Barlow',sans-serif;letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:{{ c.chipBg }};color:{{ c.chipFg }}">{{ c.outcomeLabel }}</span>
+        </div>
+        <p style="margin:0;font:500 16px/1.4 'Barlow',sans-serif;text-wrap:pretty">{{ c.summary }}</p>
+        <sc-if value="{{ c.hasTranscript }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ c.onToggle }}" style="all:unset;cursor:pointer;align-self:flex-start;height:36px;display:flex;align-items:center;font:700 14px 'Barlow',sans-serif;color:#D9B872">{{ c.toggleLabel }}</button>
+        </sc-if>
+        <sc-if value="{{ c.open }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:8px;border-top:1px solid #2E2A24;padding-top:10px">
+            <sc-for list="{{ c.lines }}" as="l" hint-placeholder-count="3">
+              <div style="display:flex;flex-direction:column;gap:2px">
+                <span style="font:700 11px/1 'Barlow',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:{{ l.whoColor }}">{{ l.who }}</span>
+                <span style="font:400 15px/1.4 'Barlow',sans-serif">{{ l.text }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isLog }}" hint-placeholder-val="{{ false }}">
+<div style="padding:20px 18px 28px;display:flex;flex-direction:column;gap:14px">
+  <h1 style="margin:0;font:700 30px/1.05 'Barlow Condensed',sans-serif">Call log</h1>
+  <sc-for list="{{ log }}" as="c" hint-placeholder-count="5">
+    <button onClick="{{ c.onOpen }}" style="all:unset;cursor:pointer;background:#1A1815;border:1px solid #2E2A24;border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span style="font:700 17px/1.2 'Barlow',sans-serif">{{ c.company }}</span>
+        <span style="flex:none;font:700 11px/1 'Barlow',sans-serif;letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:{{ c.chipBg }};color:{{ c.chipFg }}">{{ c.outcomeLabel }}</span>
+      </div>
+      <span style="font:500 13px 'Barlow',sans-serif;color:#A39A8C">{{ c.when }} · {{ c.dur }} · {{ c.lineCount }} transcript lines</span>
+      <span style="font:500 15px/1.4 'Barlow',sans-serif;color:#CFC8BC;text-wrap:pretty">{{ c.summary }}</span>
+    </button>
+  </sc-for>
+</div>
+</sc-if>
+
+</main>
+
+<sc-if value="{{ showChrome }}" hint-placeholder-val="{{ true }}">
+<nav style="flex:none;display:grid;grid-template-columns:repeat(4,1fr);background:#1A1815;border-top:1px solid #2E2A24;padding-bottom:env(safe-area-inset-bottom)">
+  <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+    <button onClick="{{ t.onPick }}" style="all:unset;cursor:pointer;height:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font:700 13px/1 'Barlow',sans-serif;color:{{ t.fg }}">
+      <span style="width:26px;height:4px;border-radius:2px;background:{{ t.bar }}"></span>{{ t.label }}
+    </button>
+  </sc-for>
+</nav>
+</sc-if>
+
+<sc-if value="{{ isCall }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;background:#0F0D0A;color:#F5F2EC;display:flex;flex-direction:column;padding:22px 20px calc(20px + env(safe-area-inset-bottom))">
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <span style="display:flex;align-items:center;gap:8px;font:700 13px/1 'Barlow',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#C9A45C"><span style="width:10px;height:10px;border-radius:50%;background:#C9A45C;animation:mmRec 1.2s infinite"></span>{{ callStatus }}</span>
+    <span style="font:700 26px/1 'Barlow Condensed',sans-serif;font-variant-numeric:tabular-nums">{{ callTime }}</span>
+  </div>
+  <h1 style="margin:18px 0 2px;font:700 36px/1.05 'Barlow Condensed',sans-serif">{{ cur.company }}</h1>
+  <span style="font:500 17px 'Barlow',sans-serif;color:#B8AE9F">{{ cur.contact }} · {{ cur.phoneFmt }}</span>
+  <div style="flex:1;min-height:0;overflow-y:auto;margin:18px 0;display:flex;flex-direction:column;gap:12px;border-top:1px solid #2E2921;padding-top:16px">
+    <sc-if value="{{ noLines }}" hint-placeholder-val="{{ true }}">
+      <p style="margin:0;font:500 16px/1.45 'Barlow',sans-serif;color:#8A8276;text-wrap:pretty">{{ transcriptHint }}</p>
+    </sc-if>
+    <sc-for list="{{ liveLines }}" as="l" hint-placeholder-count="0">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span style="font:700 11px/1 'Barlow',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:{{ l.whoColor }}">{{ l.who }}</span>
+        <span style="font:500 19px/1.4 'Barlow',sans-serif">{{ l.text }}</span>
+      </div>
+    </sc-for>
+    <sc-if value="{{ hasInterim }}" hint-placeholder-val="{{ false }}">
+      <span style="font:500 19px/1.4 'Barlow',sans-serif;color:#8A8276">{{ interim }}</span>
+    </sc-if>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:12px">
+    <button onClick="{{ toggleListen }}" style="all:unset;cursor:pointer;height:72px;border-radius:20px;border:2px solid {{ listenBorder }};color:#F5F2EC;display:flex;align-items:center;justify-content:center;text-align:center;font:700 16px/1.15 'Barlow',sans-serif">{{ listenLabel }}</button>
+    <button onClick="{{ endCall }}" style="all:unset;cursor:pointer;height:72px;border-radius:20px;background:#D6362B;color:#fff;display:flex;align-items:center;justify-content:center;font:800 26px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase" style-active="transform:scale(.97)">End call</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isWrap }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;background:#0E0D0B;display:flex;flex-direction:column">
+  <div style="flex:1;min-height:0;overflow-y:auto;padding:22px 18px 18px;display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span style="font:600 13px/1 'Barlow',sans-serif;color:#A39A8C;text-transform:uppercase;letter-spacing:.08em">{{ cur.company }} · {{ callTime }}</span>
+      <h1 style="margin:0;font:700 32px/1.05 'Barlow Condensed',sans-serif">How did it go?</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <sc-for list="{{ outcomes }}" as="o" hint-placeholder-count="4">
+        <button onClick="{{ o.onPick }}" style="all:unset;cursor:pointer;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;font:700 18px 'Barlow',sans-serif;background:{{ o.bg }};color:{{ o.fg }};border:2px solid {{ o.border }}">{{ o.label }}</button>
+      </sc-for>
+    </div>
+    <span style="font:700 14px/1 'Barlow',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#A39A8C">Follow up</span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <sc-for list="{{ followOpts }}" as="f" hint-placeholder-count="4">
+        <button onClick="{{ f.onPick }}" style="all:unset;cursor:pointer;height:46px;padding:0 16px;border-radius:23px;display:flex;align-items:center;font:600 15px 'Barlow',sans-serif;background:{{ f.bg }};color:{{ f.fg }};border:1px solid #3A352E">{{ f.label }}</button>
+      </sc-for>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font:700 14px/1 'Barlow',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#A39A8C">Notes</span>
+      <button onClick="{{ toggleDictate }}" style="all:unset;cursor:pointer;height:40px;padding:0 14px;border-radius:20px;background:{{ dictateBg }};color:{{ dictateFg }};display:flex;align-items:center;font:700 14px 'Barlow',sans-serif">{{ dictateLabel }}</button>
+    </div>
+    <textarea value="{{ wrapNote }}" onChange="{{ onNote }}" placeholder="Tap Dictate and talk — or type" style="width:100%;box-sizing:border-box;min-height:96px;border-radius:14px;border:1px solid #2E2A24;background:#1A1815;padding:12px 14px;font:500 16px/1.4 'Barlow',sans-serif;color:#F2EEE6;outline:none;resize:vertical"></textarea>
+    <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+      <span style="font:700 14px/1 'Barlow',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#A39A8C">Transcript summary</span>
+      <p style="margin:0;font:500 16px/1.4 'Barlow',sans-serif;text-wrap:pretty">{{ wrapSummary }}</p>
+      <span style="font:500 13px 'Barlow',sans-serif;color:#8A8276">{{ lineCount }} lines saved to call history</span>
+    </div>
+    <a href="{{ cur.smsHref }}" style="height:52px;border-radius:14px;border:1.5px solid #C9A45C;color:#C9A45C;display:flex;align-items:center;justify-content:center;font:700 15px 'Barlow',sans-serif;text-decoration:none">{{ cur.textLabel }}</a>
+  </div>
+  <div style="flex:none;padding:12px 18px calc(14px + env(safe-area-inset-bottom));background:#0E0D0B;border-top:1px solid #2E2A24">
+    <button onClick="{{ saveWrap }}" style="all:unset;cursor:pointer;width:100%;height:64px;border-radius:18px;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:800 24px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase">{{ saveLabel }}</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDrive }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;background:#0F0D0A;color:#F5F2EC;display:flex;flex-direction:column;padding:20px 20px calc(20px + env(safe-area-inset-bottom))">
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <span style="font:800 18px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;color:#C9A45C">DRIVE MODE · {{ drivePos }}</span>
+    <button onClick="{{ exitDrive }}" style="all:unset;cursor:pointer;height:48px;padding:0 18px;border-radius:24px;border:1.5px solid #3D372F;display:flex;align-items:center;font:700 15px 'Barlow',sans-serif">Exit</button>
+  </div>
+  <sc-if value="{{ driveHas }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:10px;min-height:0">
+      <span style="align-self:flex-start;font:700 12px/1 'Barlow',sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:6px;background:{{ drv.chipBg }};color:{{ drv.chipFg }}">{{ drv.statusLabel }}</span>
+      <h1 style="margin:0;font:800 46px/1 'Barlow Condensed',sans-serif;text-wrap:balance">{{ drv.company }}</h1>
+      <span style="font:600 22px/1.2 'Barlow',sans-serif;color:#D8D1C4">{{ drv.contact }} · {{ drv.city }}</span>
+      <span style="font:500 17px/1.4 'Barlow',sans-serif;color:#8A8276;text-wrap:pretty">{{ drv.lastSummary }}</span>
+    </div>
+    <div style="display:flex;justify-content:center;padding:10px 0 22px">
+      <button onClick="{{ driveCall }}" aria-label="Call" style="all:unset;cursor:pointer;width:190px;height:190px;border-radius:50%;background:#C9A45C;color:#0F0D0A;display:flex;align-items:center;justify-content:center;font:800 44px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;animation:mmPulse 2s infinite" style-active="transform:scale(.95)">CALL</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <button onClick="{{ drivePrev }}" style="all:unset;cursor:pointer;height:68px;border-radius:18px;border:2px solid #3D372F;display:flex;align-items:center;justify-content:center;font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em">← PREV</button>
+      <button onClick="{{ driveNext }}" style="all:unset;cursor:pointer;height:68px;border-radius:18px;border:2px solid #3D372F;display:flex;align-items:center;justify-content:center;font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em">SKIP →</button>
+    </div>
+    <button onClick="{{ toggleVoice }}" style="all:unset;cursor:pointer;margin-top:12px;height:60px;border-radius:18px;background:{{ voiceBg }};color:{{ voiceFg }};display:flex;align-items:center;justify-content:center;font:700 17px 'Barlow',sans-serif;text-align:center">{{ voiceLabel }}</button>
+  </sc-if>
+  <sc-if value="{{ driveDone }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px">
+      <h1 style="margin:0;font:800 44px/1 'Barlow Condensed',sans-serif">Queue done.</h1>
+      <span style="font:500 19px/1.4 'Barlow',sans-serif;color:#B8AE9F">{{ callsToday }} calls made today. Transcripts are in the call log.</span>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ showBrief }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end">
+  <div style="width:100%;background:#0E0D0B;border-top:3px solid #C9A45C;border-radius:22px 22px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px;max-height:92%;overflow-y:auto;box-sizing:border-box">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0;font:700 26px/1 'Barlow Condensed',sans-serif;color:#F2EEE6">Update prospect list</h2>
+      <button onClick="{{ closeBrief }}" style="all:unset;cursor:pointer;height:44px;padding:0 8px;font:600 15px 'Barlow',sans-serif;color:#A39A8C">Close</button>
+    </div>
+    <sc-if value="{{ briefInput }}" hint-placeholder-val="{{ true }}">
+      <span style="font:500 15px/1.45 'Barlow',sans-serif;color:#A39A8C;text-wrap:pretty">Upload today's briefing CSV or paste the briefing. New companies get added, existing ones get updated, and top-priority work goes to the top of your queue.</span>
+      <a href="{{ claudeHref }}" target="_blank" style="height:56px;border-radius:14px;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:700 16px 'Barlow',sans-serif;text-decoration:none">1 · Ask Claude for today's briefing</a>
+      <button onClick="{{ pasteBrief }}" style="all:unset;cursor:pointer;height:56px;border-radius:14px;border:1.5px solid #C9A45C;color:#C9A45C;display:flex;align-items:center;justify-content:center;font:700 16px 'Barlow',sans-serif">2 · Paste Claude's answer</button>
+      <label style="height:48px;border-radius:14px;border:1.5px dashed #3A352E;color:#A39A8C;display:flex;align-items:center;justify-content:center;font:600 15px 'Barlow',sans-serif;cursor:pointer">or upload a CSV file
+        <input type="file" accept=".csv,.txt,text/csv,text/plain" onChange="{{ onBriefFile }}" style="display:none">
+      </label>
+      <textarea value="{{ briefText }}" onChange="{{ onBriefText }}" placeholder="…or paste the daily briefing here" style="width:100%;box-sizing:border-box;min-height:150px;border-radius:14px;border:1px solid #2E2A24;background:#1A1815;padding:12px 14px;font:500 15px/1.4 'Barlow',sans-serif;color:#F2EEE6;outline:none;resize:vertical"></textarea>
+      <sc-if value="{{ hasBriefError }}" hint-placeholder-val="{{ false }}">
+        <span style="font:600 14px/1.4 'Barlow',sans-serif;color:#F08A80">{{ briefError }}</span>
+      </sc-if>
+      <button onClick="{{ processBrief }}" style="all:unset;cursor:pointer;height:60px;border-radius:16px;background:{{ briefBtnBg }};color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:800 22px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase">{{ processLabel }}</button>
+    </sc-if>
+    <sc-if value="{{ briefReview }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:2px"><span style="font:700 28px/1 'Barlow Condensed',sans-serif;color:#F2EEE6">{{ briefAdded }}</span><span style="font:500 13px 'Barlow',sans-serif;color:#A39A8C">New</span></div>
+        <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:2px"><span style="font:700 28px/1 'Barlow Condensed',sans-serif;color:#F2EEE6">{{ briefUpdated }}</span><span style="font:500 13px 'Barlow',sans-serif;color:#A39A8C">Updated</span></div>
+        <div style="background:#1A1815;border:1px solid #C9A45C;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:2px"><span style="font:700 28px/1 'Barlow Condensed',sans-serif;color:#C9A45C">{{ briefTopCount }}</span><span style="font:500 13px 'Barlow',sans-serif;color:#A39A8C">Top priority</span></div>
+      </div>
+      <sc-if value="{{ briefNothing }}" hint-placeholder-val="{{ false }}">
+        <span style="font:500 15px/1.4 'Barlow',sans-serif;color:#A39A8C">Nothing new — everything in this briefing is already on your list.</span>
+      </sc-if>
+      <sc-for list="{{ briefTop }}" as="t" hint-placeholder-count="2">
+        <div style="background:#1A1815;border:1px solid #2E2A24;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:4px">
+          <span style="font:700 16px/1.2 'Barlow',sans-serif;color:#F2EEE6">{{ t.company }}</span>
+          <span style="font:500 14px/1.4 'Barlow',sans-serif;color:#A39A8C;text-wrap:pretty">{{ t.lead }}</span>
+        </div>
+      </sc-for>
+      <button onClick="{{ applyBrief }}" style="all:unset;cursor:pointer;height:60px;border-radius:16px;background:#C9A45C;color:#0E0D0B;display:flex;align-items:center;justify-content:center;font:800 22px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase">{{ applyLabel }}</button>
+    </sc-if>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showAdd }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;background:rgba(15,13,10,.55);display:flex;align-items:flex-end">
+  <div style="width:100%;background:#0E0D0B;border-radius:22px 22px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px;max-height:90%;overflow-y:auto;box-sizing:border-box">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0;font:700 26px/1 'Barlow Condensed',sans-serif">New prospect</h2>
+      <button onClick="{{ closeAdd }}" style="all:unset;cursor:pointer;height:44px;padding:0 8px;font:600 15px 'Barlow',sans-serif;color:#A39A8C">Cancel</button>
+    </div>
+    <sc-for list="{{ addFields }}" as="fld" hint-placeholder-count="5">
+      <label style="display:flex;flex-direction:column;gap:6px;font:700 12px/1 'Barlow',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#A39A8C">{{ fld.label }}
+        <input value="{{ fld.value }}" onChange="{{ fld.onChange }}" type="{{ fld.type }}" placeholder="{{ fld.ph }}" style="height:50px;border-radius:12px;border:1px solid #2E2A24;background:#1A1815;padding:0 14px;font:500 17px 'Barlow',sans-serif;color:#F2EEE6;outline:none;text-transform:none;letter-spacing:0">
+      </label>
+    </sc-for>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <sc-for list="{{ typeOpts }}" as="t" hint-placeholder-count="5">
+        <button onClick="{{ t.onPick }}" style="all:unset;cursor:pointer;height:42px;padding:0 14px;border-radius:21px;display:flex;align-items:center;font:600 14px 'Barlow',sans-serif;background:{{ t.bg }};color:{{ t.fg }};border:1px solid #3A352E">{{ t.label }}</button>
+      </sc-for>
+    </div>
+    <span style="font:700 12px/1 'Barlow',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#A39A8C;margin-top:4px">Materials interested in</span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <sc-for list="{{ matOpts }}" as="t" hint-placeholder-count="3">
+        <button onClick="{{ t.onPick }}" style="all:unset;cursor:pointer;height:42px;padding:0 14px;border-radius:21px;display:flex;align-items:center;font:600 14px 'Barlow',sans-serif;background:{{ t.bg }};color:{{ t.fg }};border:1px solid #3A352E">{{ t.label }}</button>
+      </sc-for>
+    </div>
+    <button onClick="{{ saveAdd }}" style="all:unset;cursor:pointer;height:60px;border-radius:16px;background:{{ addBtnBg }};color:#F2EEE6;display:flex;align-items:center;justify-content:center;font:800 22px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase;margin-top:4px">Save prospect</button>
+  </div>
+</div>
+</sc-if>
+
+</div>
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#0E0D0B"/><text x="50" y="64" text-anchor="middle" font-family="Arial Black,Arial" font-weight="900" font-size="44" fill="#C9A45C">M</text></svg></template>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;driveAutoNext&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Behavior&quot;},&quot;demoTranscript&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Behavior&quot;}}">
+const KEY = 'monarch-prospects-v2';
+const DAY = 86400000;
+const iso = d => new Date(d).toISOString().slice(0, 10);
+const T0 = new Date(); T0.setHours(0, 0, 0, 0);
+const rel = n => iso(T0.getTime() + n * DAY);
+const STATUS = {
+  new: { label: 'New', bg: '#1B2533', fg: '#9CC0EA' },
+  follow: { label: 'Follow-up', bg: '#33291A', fg: '#E2C27F' },
+  interested: { label: 'Interested', bg: '#33291A', fg: '#E2C27F' },
+  customer: { label: 'Customer', bg: '#16291D', fg: '#8FD1A4' },
+  notnow: { label: 'Not now', bg: '#26231F', fg: '#B3AB9E' },
+};
+const OUTCOME = {
+  interested: { ...STATUS.follow, label: 'Interested', status: 'interested' },
+  callback: { label: 'Call back', status: 'follow', bg: '#1B2533', fg: '#9CC0EA' },
+  notnow: { ...STATUS.notnow, label: 'Not now', status: 'notnow' },
+  won: { ...STATUS.customer, label: 'Won', status: 'customer' },
+  none: { label: 'Logged', status: null, bg: '#26231F', fg: '#B3AB9E' },
+};
+const SEED = [
+  { id: 1, company: 'Inland Empire Demo Co.', contact: 'Ray Castillo', phone: '9515550142', type: 'Demolition', city: 'Riverside', interest: 'Dumping', status: 'follow', next: rel(0), calls: [
+    { at: T0.getTime() - 3 * DAY + 36e6, secs: 262, outcome: 'callback', summary: 'Tearing out a 40k sq ft parking lot in Moreno Valley next month. Wants dump rates for end dumps.', lines: [
+      { who: 'You', text: 'Hey Ray, this is with Monarch Materials over in Perris.' },
+      { who: 'Them', text: 'Yeah, we got a lot job coming up in Moreno Valley, about forty thousand square feet.' },
+      { who: 'You', text: 'We take clean asphalt and concrete. End dumps are no problem.' },
+      { who: 'Them', text: 'Call me back Monday with the per-load rate.' }] }] },
+  { id: 2, company: 'Sierra Grading & Paving', contact: 'Dana Whitfield', phone: '9095550187', type: 'Paving', city: 'Temecula', interest: 'Buying base', status: 'new', next: null, calls: [] },
+  { id: 3, company: 'Valley Haulers LLC', contact: 'Marcus Lee', phone: '9515550163', type: 'Hauler', city: 'Perris', interest: 'Dumping', status: 'interested', next: rel(-1), calls: [
+    { at: T0.getTime() - 6 * DAY + 50e6, secs: 145, outcome: 'interested', summary: 'Runs 6 super 10s. Interested in steady dumping close to the 215.', lines: [
+      { who: 'Them', text: 'We run six super tens, mostly out of Menifee.' },
+      { who: 'You', text: 'We are right off Goetz Road, easy in and out.' }] }] },
+  { id: 4, company: 'Coastline Builders', contact: 'Priya Natarajan', phone: '7145550119', type: 'General contractor', city: 'Corona', interest: 'Buying base', status: 'new', next: null, calls: [] },
+  { id: 5, company: 'Hemet Site Works', contact: 'Tony Alvarez', phone: '9515550108', type: 'Grading', city: 'Hemet', interest: 'Both', status: 'customer', next: rel(5), calls: [
+    { at: T0.getTime() - 10 * DAY + 40e6, secs: 380, outcome: 'won', summary: 'Ordered 400 tons of crushed aggregate base for a pad in Hemet. Deliver Thursdays.', lines: [
+      { who: 'Them', text: 'Let us do four hundred tons of base to start.' }] }] },
+  { id: 6, company: 'Menifee Concrete Cutting', contact: 'Jess Romero', phone: '9515550174', type: 'Demolition', city: 'Menifee', interest: 'Dumping', status: 'new', next: null, calls: [] },
+  { id: 7, company: 'Pacific Rim Trucking', contact: 'Hector Ruiz', phone: '9095550131', type: 'Hauler', city: 'Fontana', interest: 'Dumping', status: 'follow', next: rel(0), calls: [] },
+];
+const DEMO = [
+  { who: 'You', text: 'Hi, this is with Monarch Materials in Perris. Got a minute?' },
+  { who: 'Them', text: 'Sure, what do you have?' },
+  { who: 'You', text: 'We take clean broken concrete and asphalt, and we sell recycled crushed aggregate base.' },
+  { who: 'Them', text: 'We have about 30 loads of concrete coming off a job in Lake Elsinore.' },
+  { who: 'You', text: 'We can take all of it. 10 wheelers, super 10s, end dumps are all fine.' },
+  { who: 'Them', text: 'What are you charging per load? Send me the pricing.' },
+  { who: 'You', text: 'I will text you the pricing page right after this call.' },
+  { who: 'Them', text: 'Sounds good. Call me Thursday and we can set it up.' },
+];
+const parseCSV = txt => { const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < txt.length; i++) { const c = txt[i];
+    if (q) { if (c === '"') { if (txt[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true; else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && txt[i + 1] === '\n') i++; row.push(f); f = ''; if (row.length > 1) rows.push(row); row = []; } else f += c; }
+  if (f || row.length) { row.push(f); if (row.length > 1) rows.push(row); }
+  const hd = (rows.shift() || []).map(x => x.trim().toLowerCase());
+  return rows.map(r => { const o = {}; hd.forEach((k, j) => o[k] = (r[j] || '').trim()); return o; }); };
+const normName = s => (s || '').toLowerCase().replace(/\b(inc|llc|co|corp|corporation|company|the)\b/g, '').replace(/[^a-z0-9]/g, '');
+const DUMPCATS = /Demolition|cutting|Concrete|Asphalt|Ready-mix|Precast|pumping|Masonry/i;
+const toProspect = o => { const g = (...k) => { for (const x of k) { const v = o[x] ?? o[x.toLowerCase()]; if (v !== undefined && v !== null && String(v).trim()) return String(v).trim(); } return ''; };
+  const type = g('category', 'type') || 'Other'; const pr = g('priority', 'top');
+  return { company: g('company'), contact: g('contact'), title: g('title'), phone: g('phone', 'direct').replace(/\D/g, '').slice(-10), email: g('email'), type, city: g('city'), address: g('address'),
+    interest: DUMPCATS.test(type) ? 'Dumping' : 'Both', score: +g('demo', 'score') || 0, size: g('demosize', 'size'), top: /most important|true|yes|high|top/i.test(pr), lead: g('lead'), notes: g('notes') }; };
+const fmtPhone = p => { const d = (p || '').replace(/\D/g, '').slice(-10); return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : p; };
+const fmtTime = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const fmtWhen = t => { const d = new Date(t); const days = Math.round((T0 - new Date(d).setHours(0, 0, 0, 0)) / DAY); const tm = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); return days === 0 ? `Today ${tm}` : days === 1 ? `Yesterday ${tm}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${tm}`; };
+const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad/i.test(navigator.userAgent);
+const summarize = lines => {
+  if (!lines.length) return 'No transcript captured.';
+  const them = lines.filter(l => l.who !== 'You');
+  const key = (them.length ? them : lines).filter(l => /\d|load|ton|price|pricing|call|send|job|base|week|monday|tuesday|wednesday|thursday|friday/i.test(l.text));
+  return (key.length ? key : them.length ? them : lines).slice(0, 3).map(l => l.text.replace(/\.$/, '')).join('. ') + '.';
+};
+
+class Component extends DCLogic {
+  state = { screen: 'today', prev: 'today', prospects: [], activeId: null, search: '', filter: 'all', openCall: null,
+    call: null, listening: false, interim: '', wrap: null, dictating: false, driveIdx: 0, voice: false, logoFailed: false,
+    add: null, brief: null, briefAt: null };
+
+  componentDidMount() {
+    let s = null; try { s = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+    if (Array.isArray(s) && !localStorage.getItem('monarch-cleanup-1')) {
+      s = s.filter(p => p.company !== 'Test New Co').map(p => p.company === 'Holliday Rock' && p.lead === 'Plant expansion demo'
+        ? { ...p, lead: '', top: false, pinned: null, score: 64, notes: 'Right next door on Goetz Rd. Ask for the Perris plant manager.' } : p);
+      try { localStorage.setItem(KEY, JSON.stringify(s)); localStorage.removeItem('monarch-brief-at'); localStorage.setItem('monarch-cleanup-1', '1'); } catch (e) {}
+    }
+    this.setState({ briefAt: localStorage.getItem('monarch-brief-at') });
+    if (Array.isArray(s)) { this.setState({ prospects: s }); return; }
+    let mine = []; try { mine = (JSON.parse(localStorage.getItem('monarch-prospects-v1')) || []).filter(p => p.id > 7 && p.id < 1000 || p.id > 1e12); } catch (e) {}
+    (window.MONARCH_PROSPECTS ? Promise.resolve(window.MONARCH_PROSPECTS) : fetch('./prospects.json').then(r => r.json())).then(list => this.persist([...mine, ...list])).catch(() => { if (mine.length) this.persist(mine); });
+  }
+  componentWillUnmount() { clearInterval(this.timer); clearInterval(this.demo); this.stopRec(); }
+  persist(prospects) { this.setState({ prospects }); try { localStorage.setItem(KEY, JSON.stringify(prospects)); } catch (e) {} }
+  get cur() { return this.state.prospects.find(p => p.id === this.state.activeId); }
+  go(screen) { this.setState(s => ({ screen, prev: s.screen === 'detail' ? s.prev : s.screen })); }
+  open(id) { this.setState(s => ({ activeId: id, screen: 'detail', prev: s.screen, openCall: null })); }
+
+  // speech
+  startRec(onFinal, { continuous = true } = {}) {
+    if (!SR) return false;
+    this.stopRec();
+    const r = new SR(); r.continuous = continuous; r.interimResults = true; r.lang = 'en-US';
+    r.onresult = e => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript.trim(); if (e.results[i].isFinal) { if (t) onFinal(t); } else interim += t + ' '; } this.setState({ interim: interim.trim() }); };
+    r.onend = () => { if (this.rec === r && this.keepRec) { try { r.start(); } catch (e) {} } };
+    r.onerror = () => {};
+    this.rec = r; this.keepRec = true;
+    try { r.start(); } catch (e) { return false; }
+    return true;
+  }
+  stopRec() { this.keepRec = false; if (this.rec) { try { this.rec.stop(); } catch (e) {} this.rec = null; } }
+
+  // calls
+  placeCall(id) {
+    const p = this.state.prospects.find(x => x.id === id); if (!p) return;
+    if (!p.phone) { this.open(id); return; }
+    this.stopRec(); clearInterval(this.demo);
+    this.setState({ activeId: id, screen: 'call', call: { start: Date.now(), secs: 0, lines: [] }, listening: false, interim: '', voice: false });
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.setState(s => s.call ? { call: { ...s.call, secs: Math.round((Date.now() - s.call.start) / 1000) } } : null), 1000);
+    if (isMobile) { const a = document.createElement('a'); a.href = 'tel:' + p.phone; a.click(); }
+    else if (this.props.demoTranscript ?? true) {
+      let i = 0;
+      this.setState({ listening: true });
+      this.demo = setInterval(() => { if (i >= DEMO.length) { clearInterval(this.demo); this.setState({ listening: false }); return; } const l = DEMO[i++]; this.setState(s => ({ call: { ...s.call, lines: [...s.call.lines, l] } })); }, 1800);
+    }
+  }
+  toggleListen = () => {
+    if (this.state.listening) { this.stopRec(); clearInterval(this.demo); this.setState({ listening: false, interim: '' }); return; }
+    const ok = this.startRec(t => this.setState(s => ({ call: { ...s.call, lines: [...s.call.lines, { who: 'Call', text: t }] } })));
+    this.setState({ listening: ok });
+  };
+  endCall = () => {
+    clearInterval(this.timer); clearInterval(this.demo); this.stopRec();
+    const lines = this.state.call ? this.state.call.lines : [];
+    this.setState({ screen: 'wrap', listening: false, interim: '', wrap: { outcome: null, follow: null, note: '', summary: lines.length && window.claude ? 'Summarizing…' : summarize(lines) } });
+    if (lines.length && window.claude && window.claude.complete) {
+      const txt = lines.map(l => l.who + ': ' + l.text).join('\n');
+      window.claude.complete(`Summarize this sales call for a concrete & asphalt recycler (Monarch Materials) in 1-2 short sentences: what the prospect needs, quantities, and next step. Plain text only.\n\n${txt}`)
+        .then(r => this.setState(st => st.wrap ? { wrap: { ...st.wrap, summary: String(r).trim() } } : null))
+        .catch(() => this.setState(st => st.wrap ? { wrap: { ...st.wrap, summary: summarize(lines) } } : null));
+    }
+  };
+  toggleDictate = () => {
+    if (this.state.dictating) { this.stopRec(); this.setState({ dictating: false, interim: '' }); return; }
+    const ok = this.startRec(t => this.setState(s => ({ wrap: { ...s.wrap, note: (s.wrap.note ? s.wrap.note + ' ' : '') + t } })));
+    this.setState({ dictating: ok });
+  };
+  saveWrap = () => {
+    this.stopRec();
+    const { wrap, call, activeId, prospects } = this.state;
+    const oc = wrap.outcome || 'none';
+    const summary = [wrap.note, call.lines.length ? wrap.summary : ''].filter(Boolean).join(' — ') || 'Call logged, no notes.';
+    const next = wrap.follow == null ? undefined : wrap.follow === -1 ? null : rel(wrap.follow);
+    const ps = prospects.map(p => p.id !== activeId ? p : {
+      ...p, pinned: null, status: OUTCOME[oc].status || (wrap.follow > 0 ? 'follow' : p.status), next: next === undefined ? (p.next && p.next <= rel(0) ? null : p.next) : next,
+      calls: [{ at: call.start, secs: call.secs, outcome: oc, summary, lines: call.lines }, ...p.calls] });
+    this.persist(ps);
+    const fromDrive = this.state.prev === 'drive' || this.wasDrive;
+    this.setState({ wrap: null, call: null, dictating: false });
+    if (fromDrive) { this.wasDrive = false; this.setState(s => ({ screen: 'drive', driveIdx: (this.props.driveAutoNext ?? true) ? s.driveIdx + 1 : s.driveIdx })); }
+    else this.setState({ screen: 'detail' });
+  };
+
+  queueList() {
+    const today = rel(0);
+    const rank = p => (p.pinned ? -1 : p.next && p.next <= today ? 0 : p.status === 'new' ? 1 : p.status === 'interested' || p.status === 'follow' ? 2 : 9);
+    return this.state.prospects.filter(p => rank(p) < 9).sort((a, b) => rank(a) - rank(b) || (b.pinned || 0) - (a.pinned || 0) || (b.top ? 1 : 0) - (a.top ? 1 : 0) || (b.score || 0) - (a.score || 0));
+  }
+  decorate(p) {
+    const st = STATUS[p.status] || STATUS.new;
+    const last = p.calls[0];
+    const due = p.next && p.next <= rel(0);
+    return { ...p, statusLabel: p.pinned ? 'New top lead' : due ? 'Due today' : st.label, chipBg: p.pinned ? '#D6362B' : due ? '#C9A45C' : st.bg, chipFg: p.pinned ? '#fff' : due ? '#0E0D0B' : st.fg,
+      lastLabel: last ? 'Last call ' + fmtWhen(last.at) : 'Never called', lastSummary: last ? last.summary : (p.lead || `${p.type} · interested in ${(p.interest || '').toLowerCase()}`),
+      contact: p.contact || p.title || 'Main line', firstName: p.contact ? p.contact.split(' ')[0] : '', phoneFmt: p.phone ? fmtPhone(p.phone) : 'No phone yet',
+      callLabel: !p.phone ? 'No phone number' : p.contact ? 'Call ' + p.contact.split(' ')[0] : 'Call', textLabel: p.contact ? `Text ${p.contact.split(' ')[0]} the pricing link` : 'Text the pricing link',
+      topLabel: p.top ? 'Top priority' : '', isTop: !!p.top, sizeLabel: p.size ? `${p.size} demo volume · score ${p.score}` : '', hasLead: !!p.lead, hasNotes: !!p.notes, hasEmail: !!p.email, emailHref: 'mailto:' + (p.email || ''), hasAddress: !!p.address,
+      onOpen: () => this.open(p.id), onCall: () => { this.wasDrive = false; this.setState({ prev: this.state.screen }); this.placeCall(p.id); } };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const scr = s.screen;
+    const queue = this.queueList();
+    const today = rel(0);
+    const callsToday = s.prospects.reduce((n, p) => n + p.calls.filter(c => c.at >= T0.getTime()).length, 0);
+    const curRaw = this.cur;
+    const cur = curRaw ? this.decorate(curRaw) : {};
+    if (curRaw) {
+      Object.assign(cur, {
+        smsHref: `sms:${curRaw.phone}?body=${encodeURIComponent(`Hi ${cur.firstName}, here's Monarch Materials pricing for dumping and recycled base: https://monarch-materials.com/pricing/`)}`,
+        mapHref: `https://www.google.com/maps/search/${encodeURIComponent(curRaw.address || (curRaw.company + ' ' + curRaw.city + ' CA'))}`,
+        hasFollow: !!curRaw.next, followLabel: curRaw.next ? new Date(curRaw.next + 'T12:00').toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' }) : '',
+        noCalls: !curRaw.calls.length });
+    }
+    const whoColor = w => (w === 'You' ? '#C9A45C' : w === 'Them' ? '#7FB2E5' : '#B8AE9F');
+    const curCalls = curRaw ? curRaw.calls.map((c, i) => { const o = OUTCOME[c.outcome] || OUTCOME.none; const open = s.openCall === i; return {
+      when: fmtWhen(c.at), dur: fmtTime(c.secs), outcomeLabel: o.label, chipBg: o.bg, chipFg: o.fg, summary: c.summary, hasTranscript: c.lines.length > 0,
+      open, toggleLabel: open ? 'Hide transcript' : `View transcript (${c.lines.length})`, onToggle: () => this.setState({ openCall: open ? null : i }),
+      lines: c.lines.map(l => ({ ...l, whoColor: l.who === 'You' ? '#C9A45C' : l.who === 'Them' ? '#9CC0EA' : '#A39A8C' })) }; }) : [];
+
+    const q = s.search.toLowerCase();
+    const inF = (p, k) => k === 'all' || (k === 'top' ? p.top : k === 'follow' ? ['follow', 'interested'].includes(p.status) : p.status === k);
+    const filtered = s.prospects.filter(p => inF(p, s.filter) && (!q || [p.company, p.contact, p.city, p.type, p.lead, p.notes, p.address].join(' ').toLowerCase().includes(q)));
+    const fdefs = [['all', 'All'], ['top', 'Top priority'], ['new', 'New'], ['follow', 'Follow-up'], ['customer', 'Customers']];
+    const filters = fdefs.map(([k, label]) => ({ label, count: s.prospects.filter(p => inF(p, k)).length,
+      bg: s.filter === k ? '#C9A45C' : '#1A1815', fg: s.filter === k ? '#0E0D0B' : '#F2EEE6', onPick: () => this.setState({ filter: k }) }));
+
+    const log = s.prospects.flatMap(p => p.calls.map(c => ({ ...c, pid: p.id, company: p.company }))).sort((a, b) => b.at - a.at).map(c => { const o = OUTCOME[c.outcome] || OUTCOME.none; return {
+      company: c.company, when: fmtWhen(c.at), dur: fmtTime(c.secs), lineCount: c.lines.length, summary: c.summary, outcomeLabel: o.label, chipBg: o.bg, chipFg: o.fg, onOpen: () => this.open(c.pid) }; });
+
+    const tabKey = scr === 'detail' ? s.prev : scr;
+    const tabs = [['today', 'Today'], ['prospects', 'Prospects'], ['log', 'Call log'], ['drive', 'Drive']].map(([k, label]) => ({ label,
+      fg: tabKey === k ? '#C9A45C' : '#8A8276', bar: tabKey === k ? '#C9A45C' : 'transparent',
+      onPick: () => k === 'drive' ? this.startDrive() : this.setState({ screen: k }) }));
+
+    const call = s.call || { secs: 0, lines: [] };
+    const liveLines = call.lines.map(l => ({ ...l, whoColor: whoColor(l.who) }));
+    const w = s.wrap || {};
+    const outcomes = Object.entries(OUTCOME).filter(([k]) => k !== 'none').map(([k, o]) => ({ label: o.label, onPick: () => this.setState(st => ({ wrap: { ...st.wrap, outcome: k } })),
+      bg: w.outcome === k ? '#C9A45C' : '#1A1815', fg: w.outcome === k ? '#0E0D0B' : '#F2EEE6', border: w.outcome === k ? '#C9A45C' : '#2E2A24' }));
+    const followOpts = [[1, 'Tomorrow'], [3, 'In 3 days'], [7, 'Next week'], [30, '1 month'], [-1, 'None']].map(([d, label]) => ({ label,
+      bg: w.follow === d ? '#C9A45C' : '#1A1815', fg: w.follow === d ? '#0E0D0B' : '#F2EEE6', onPick: () => this.setState(st => ({ wrap: { ...st.wrap, follow: d } })) }));
+
+    const dq = this.driveQueue || queue;
+    const drvRaw = dq[s.driveIdx];
+    const drv = drvRaw ? this.decorate(s.prospects.find(p => p.id === drvRaw.id) || drvRaw) : {};
+
+    const a = s.add || {};
+    const setA = k => e => { const v = e.target.value; this.setState(st => ({ add: { ...st.add, [k]: v } })); };
+    const addFields = [['company', 'Company', 'text', 'e.g. Perris Valley Grading'], ['contact', 'Contact name', 'text', 'First and last'], ['phone', 'Phone', 'tel', '(951) 555-0100'], ['city', 'City', 'text', 'e.g. Menifee']]
+      .map(([k, label, type, ph]) => ({ label, type, ph, value: a[k] || '', onChange: setA(k) }));
+    const typeOpts = ['Hauler', 'Demolition', 'Paving', 'Grading', 'General contractor'].map(t => ({ label: t, bg: a.type === t ? '#C9A45C' : '#1A1815', fg: a.type === t ? '#0E0D0B' : '#F2EEE6', onPick: () => this.setState(st => ({ add: { ...st.add, type: t } })) }));
+    const matOpts = ['Dumping', 'Buying base', 'Both'].map(t => ({ label: t, bg: a.interest === t ? '#C9A45C' : '#1A1815', fg: a.interest === t ? '#0E0D0B' : '#F2EEE6', onPick: () => this.setState(st => ({ add: { ...st.add, interest: t } })) }));
+    const canSave = a.company && a.phone;
+
+    return {
+      showChrome: !['call', 'wrap', 'drive'].includes(scr),
+      isToday: scr === 'today', isProspects: scr === 'prospects', isDetail: scr === 'detail', isLog: scr === 'log', isCall: scr === 'call', isWrap: scr === 'wrap', isDrive: scr === 'drive',
+      headerLabel: scr === 'log' ? 'Call log' : 'Prospecting',
+      logoOk: !s.logoFailed, logoFailed: s.logoFailed, onLogoError: () => this.setState({ logoFailed: true }),
+      todayLabel: new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }),
+      queueCount: queue.length, callsToday, dueCount: s.prospects.filter(p => p.next && p.next <= today).length,
+      queue: queue.slice(0, 5).map(p => this.decorate(p)),
+      briefLabel: s.briefAt ? 'Last updated ' + fmtWhen(+s.briefAt) : 'Not updated yet',
+      pinnedCount: s.prospects.filter(p => p.pinned).length, hasPinned: s.prospects.some(p => p.pinned), totalCount: s.prospects.length,
+      openBrief: () => this.setState({ brief: { step: 'input', text: '', busy: false, error: '' } }), closeBrief: () => this.setState({ brief: null }),
+      showBrief: !!s.brief, briefInput: !!s.brief && s.brief.step === 'input', briefReview: !!s.brief && s.brief.step === 'review',
+      briefText: s.brief ? s.brief.text : '', onBriefText: e => { const v = e.target.value; this.setState(st => ({ brief: { ...st.brief, text: v, error: '' } })); },
+      onBriefFile: e => { const f = e.target.files && e.target.files[0]; if (!f) return; f.text().then(t => this.setState(st => ({ brief: { ...st.brief, text: t, error: '' } }))); },
+      briefError: s.brief ? s.brief.error : '', hasBriefError: !!(s.brief && s.brief.error),
+      processBrief: () => this.processBrief(), processLabel: s.brief && s.brief.busy ? 'Reading briefing…' : 'Check for new work',
+      briefBtnBg: s.brief && s.brief.text.trim() ? '#C9A45C' : '#3A352E',
+      briefAdded: s.brief && s.brief.added ? s.brief.added.length : 0, briefUpdated: s.brief && s.brief.updated ? s.brief.updated.length : 0,
+      briefTop: s.brief && s.brief.added ? [...s.brief.added, ...s.brief.updated].filter(p => p.top).map(p => ({ company: p.company, lead: p.lead || p.type })) : [],
+      briefTopCount: s.brief && s.brief.added ? [...s.brief.added, ...s.brief.updated].filter(p => p.top).length : 0,
+      briefNothing: !!(s.brief && s.brief.added && !s.brief.added.length && !s.brief.updated.length),
+      claudeHref: 'https://claude.ai/new?q=' + encodeURIComponent("Search the web for new concrete and asphalt demolition, paving, storm drain, airport and public works jobs in Riverside County and the Inland Empire announced or awarded in the last 7 days, plus the contractors who won or are bidding them. I run Monarch Materials, a concrete and asphalt recycling yard at 1920 Goetz Rd, Perris, CA. Return ONLY a CSV (no other text) with this exact header: company,contact,title,phone,email,category,city,address,priority,demo,lead,notes. Set priority to 'Most important' for large demo volume or jobs within 20 miles of Perris. demo is a 0-100 score for how much concrete/asphalt they could bring me. lead is one sentence on the new work. Only include real, verifiable info and leave unknown fields blank."),
+      pasteBrief: () => { if (navigator.clipboard && navigator.clipboard.readText) navigator.clipboard.readText().then(t => this.setState(st => ({ brief: { ...st.brief, text: t, error: '' } }))).catch(() => this.setState(st => ({ brief: { ...st.brief, error: 'Clipboard blocked — long-press the box below and choose Paste.' } }))); },
+      applyBrief: () => (s.brief.added.length + s.brief.updated.length) ? this.applyBrief() : this.setState({ brief: null }), applyLabel: s.brief && s.brief.added && (s.brief.added.length + s.brief.updated.length) ? 'Add to prospect list' : 'Done',
+      startDrive: () => this.startDrive(), goProspects: () => this.setState({ screen: 'prospects' }),
+      search: s.search, onSearch: e => this.setState({ search: e.target.value }), filters,
+      prospectList: filtered.slice().sort((a, b) => (b.pinned || 0) - (a.pinned || 0)).map(p => this.decorate(p)), noResults: !filtered.length,
+      openAdd: () => this.setState({ add: { type: 'Hauler', interest: 'Dumping' } }), matOpts, noProspects: !s.prospects.length, hasProspects: !!s.prospects.length, loadSamples: () => this.persist(SEED), closeAdd: () => this.setState({ add: null }), showAdd: !!s.add,
+      addFields, typeOpts, addBtnBg: canSave ? '#C9A45C' : '#3A352E',
+      saveAdd: () => { if (!canSave) return; const id = Date.now(); this.persist([{ id, company: a.company, contact: a.contact || 'Unknown', phone: a.phone.replace(/\D/g, ''), type: a.type || 'Hauler', city: a.city || '', interest: a.interest || 'Both', status: 'new', next: null, calls: [] }, ...s.prospects]); this.setState({ add: null }); },
+      goBack: () => this.setState({ screen: s.prev === 'detail' ? 'today' : s.prev }),
+      deleteCurrent: () => { if (!window.confirm('Delete ' + (curRaw ? curRaw.company : 'this prospect') + '?')) return; this.persist(s.prospects.filter(p => p.id !== s.activeId)); this.setState({ screen: s.prev === 'detail' ? 'today' : s.prev, activeId: null }); },
+      cur, curCalls, callCurrent: () => { this.wasDrive = false; this.placeCall(s.activeId); },
+      log,
+      tabs,
+      callStatus: s.listening ? 'On call · Transcribing' : 'On call',
+      callTime: fmtTime(call.secs), liveLines, noLines: !call.lines.length, lineCount: call.lines.length,
+      transcriptHint: SR ? 'Put the call on speaker and tap Transcribe. Lines appear here and are saved with the call.' : 'Live transcription is not supported in this browser. Use Chrome on Android.',
+      interim: s.interim, hasInterim: !!s.interim && (s.listening),
+      listenLabel: s.listening ? 'Pause transcript' : 'Transcribe', listenBorder: s.listening ? '#C9A45C' : '#3D372F', toggleListen: this.toggleListen, endCall: this.endCall,
+      outcomes, followOpts, wrapNote: w.note || '', onNote: e => { const v = e.target.value; this.setState(st => ({ wrap: { ...st.wrap, note: v } })); },
+      wrapSummary: w.summary || '', toggleDictate: this.toggleDictate,
+      dictateLabel: s.dictating ? 'Stop dictating' : 'Dictate', dictateBg: s.dictating ? '#C9A45C' : '#2E2A24', dictateFg: s.dictating ? '#0E0D0B' : '#F2EEE6',
+      saveWrap: this.saveWrap, saveLabel: this.wasDrive ? 'Save & next call' : 'Save call',
+      drv, driveHas: !!drvRaw, driveDone: !drvRaw, drivePos: drvRaw ? `${s.driveIdx + 1} of ${dq.length}` : `${dq.length} of ${dq.length}`,
+      driveCall: () => { if (!drvRaw) return; this.wasDrive = true; this.setState({ prev: 'drive' }); this.placeCall(drvRaw.id); },
+      driveNext: () => this.setState(st => ({ driveIdx: Math.min(st.driveIdx + 1, dq.length) })),
+      drivePrev: () => this.setState(st => ({ driveIdx: Math.max(st.driveIdx - 1, 0) })),
+      exitDrive: () => { this.stopRec(); this.setState({ screen: 'today', voice: false }); },
+      toggleVoice: () => this.toggleVoice(dq),
+      voiceLabel: !SR ? 'Voice commands need Chrome' : s.voice ? 'Listening — say "call", "next" or "back"' : 'Turn on voice commands', voiceBg: s.voice ? '#C9A45C' : '#221E18', voiceFg: s.voice ? '#0E0D0B' : '#F5F2EC',
+    };
+  }
+  async processBrief() {
+    const b = this.state.brief; if (!b || !b.text.trim()) return;
+    this.setState({ brief: { ...b, busy: true, error: '' } });
+    let items = [];
+    try {
+      const first = b.text.split(/\r?\n/)[0].toLowerCase();
+      if (first.includes('company') && first.includes(',')) items = parseCSV(b.text).map(toProspect);
+      else if (window.claude && window.claude.complete) {
+        const r = await window.claude.complete('Extract every company from this daily work briefing for Monarch Materials, a concrete and asphalt recycler in Perris, CA. Return ONLY a JSON array of objects with keys: company, contact, title, phone, email, type, city, address, lead (one sentence on the new work), notes, top (true if it is important new work with big concrete/asphalt demo volume or near Perris), score (0-100 demo potential). Only use facts in the text; leave unknown fields empty. Never invent phone numbers.\n\n' + b.text.slice(0, 12000));
+        const m = String(r).match(/\[[\s\S]*\]/); items = m ? JSON.parse(m[0]).map(toProspect) : [];
+      } else throw new Error('Paste the briefing as CSV (with a company column) — text briefings need AI, which is not available here.');
+    } catch (e) { this.setState({ brief: { ...b, busy: false, error: e.message || 'Could not read that briefing.' } }); return; }
+    items = items.filter(p => p.company);
+    const idx = new Map(this.state.prospects.map(p => [normName(p.company), p]));
+    const added = [], updated = [];
+    items.forEach(n => { const ex = idx.get(normName(n.company)); if (!ex) added.push(n); else if (n.lead && n.lead !== ex.lead || n.top && !ex.top || n.score > (ex.score || 0)) updated.push({ ...n, id: ex.id }); });
+    if (!items.length) { this.setState({ brief: { ...b, busy: false, error: 'No companies found in that briefing.' } }); return; }
+    this.setState({ brief: { ...b, busy: false, step: 'review', added, updated } });
+  }
+  applyBrief() {
+    const { added, updated } = this.state.brief; const now = Date.now();
+    const up = new Map(updated.map(u => [u.id, u]));
+    let ps = this.state.prospects.map(p => { const u = up.get(p.id); if (!u) return p; return { ...p,
+      lead: u.lead || p.lead, notes: [p.notes, u.notes].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' '),
+      phone: p.phone || u.phone, email: p.email || u.email, contact: p.contact || u.contact, address: p.address || u.address,
+      score: Math.max(p.score || 0, u.score || 0), top: p.top || u.top, pinned: u.top ? now : p.pinned }; });
+    const fresh = added.map((n, i) => ({ ...n, id: now + i, status: 'new', next: null, calls: [], pinned: n.top ? now : null, addedAt: now }));
+    this.persist([...fresh, ...ps]);
+    try { localStorage.setItem('monarch-brief-at', String(now)); } catch (e) {}
+    this.setState({ brief: null, briefAt: String(now), filter: 'all' });
+  }
+  startDrive() { this.driveQueue = this.queueList(); this.setState({ screen: 'drive', driveIdx: 0 }); }
+  toggleVoice(dq) {
+    if (this.state.voice) { this.stopRec(); this.setState({ voice: false }); return; }
+    const ok = this.startRec(t => {
+      const w = t.toLowerCase();
+      if (/\bcall\b|\bdial\b/.test(w)) { const p = dq[this.state.driveIdx]; if (p) { this.wasDrive = true; this.setState({ prev: 'drive' }); this.placeCall(p.id); } }
+      else if (/next|skip/.test(w)) this.setState(st => ({ driveIdx: Math.min(st.driveIdx + 1, dq.length) }));
+      else if (/back|previous/.test(w)) this.setState(st => ({ driveIdx: Math.max(st.driveIdx - 1, 0) }));
+      else if (/exit|stop/.test(w)) { this.stopRec(); this.setState({ screen: 'today', voice: false }); }
+    });
+    this.setState({ voice: ok });
+  }
+}
+</script>
+</body>
+</html>
