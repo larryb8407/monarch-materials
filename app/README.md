@@ -44,3 +44,7 @@ How it works:
 - Every change is saved on the phone first and queued (`monarch-outbox`), then uploaded when there is signal. The header shows "N unsent" while changes are waiting.
 - On the owner's first sign-in, if the team list is empty, the list on that phone (with its call history) is uploaded as the starting team list.
 - The drive route stays per phone.
+
+## Lead Finder (Chrome extension)
+
+`../extension` is a desktop Chrome side panel that pulls company names and phone numbers from bid, permit and news pages and saves them to the team list. Install steps are in `extension/README.md`; the site serves a download at `/monarch-lead-finder.zip` (rebuild it with `extension/pack.sh`).

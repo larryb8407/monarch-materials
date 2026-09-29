@@ -14,8 +14,8 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   const url = new URL(req.url);
-  // The daily briefing must always come fresh from the network.
-  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.endsWith('/briefing.csv')) return;
+  // The daily briefing and the extension download must always come fresh from the network.
+  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.endsWith('/briefing.csv') || url.pathname.endsWith('.zip')) return;
   if (req.mode === 'navigate') {
     e.respondWith(fetch(req).then(res => {
       const copy = res.clone();

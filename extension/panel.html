@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Monarch Lead Finder</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon-192.png" alt="" width="26" height="26">
+    <div class="grow">
+      <div class="brand">Monarch Lead Finder</div>
+      <div class="who" id="who"></div>
+    </div>
+    <button class="link" id="signout" hidden>Sign out</button>
+  </header>
+
+  <section id="signin" hidden>
+    <p class="muted">Sign in with the same email and password you use in the Monarch app.</p>
+    <form id="signinForm">
+      <label>Email<input type="email" id="email" autocomplete="username" required></label>
+      <label>Password<input type="password" id="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Sign in</button>
+      <div class="error" id="signinError"></div>
+    </form>
+  </section>
+
+  <main id="main" hidden>
+    <div class="actions">
+      <button class="primary" id="scan">Scan this page</button>
+      <button id="blank">+ Add by hand</button>
+    </div>
+    <p class="hint">Tip: highlight just the bid results or permit table first, then scan, to skip menus and footers.</p>
+    <div class="error" id="scanError"></div>
+
+    <section id="job" hidden>
+      <div class="label">This job</div>
+      <div class="chips" id="tags"></div>
+      <div class="meta" id="jobMeta"></div>
+    </section>
+
+    <div id="results"></div>
+  </main>
+
+  <template id="cardTpl">
+    <article class="lead">
+      <div class="status"></div>
+      <label>Company<input data-f="company"></label>
+      <div class="two">
+        <label>Phone<input data-f="phone" inputmode="tel"></label>
+        <label>City<input data-f="city"></label>
+      </div>
+      <div class="two">
+        <label>Category<select data-f="category"></select></label>
+        <label>Wants<select data-f="interest"><option>Both</option><option>Dumping</option><option>Buying base</option></select></label>
+      </div>
+      <label>Why call (the new work)<textarea data-f="lead" rows="3"></textarea></label>
+      <label>Notes<textarea data-f="notes" rows="3"></textarea></label>
+      <div class="two center">
+        <label class="check"><input type="checkbox" data-f="top"> Most important</label>
+        <label class="score">Demo score <input data-f="score" type="number" min="0" max="100"></label>
+      </div>
+      <div class="context"></div>
+      <div class="row">
+        <button class="primary save"></button>
+        <button class="link dismiss">Skip</button>
+      </div>
+      <div class="error"></div>
+    </article>
+  </template>
+
+  <script type="module" src="panel.js"></script>
+</body>
+</html>
