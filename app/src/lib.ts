@@ -25,6 +25,8 @@ export interface Prospect {
   source?: string;
   pinned?: number | null;
   addedAt?: number;
+  /** Team member who added this prospect (team mode). */
+  addedBy?: string;
   calls: Call[];
 }
 

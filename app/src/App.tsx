@@ -94,6 +94,8 @@ export default function App() {
   const [syncError, setSyncError] = useState('');
   const [account, setAccount] = useState(false);
   const [team, setTeam] = useState<Member[] | null>(null);
+  const [logWho, setLogWho] = useState('');
+  const [syncing, setSyncing] = useState(false);
 
   const timer = useRef<number | undefined>(undefined);
   const demo = useRef<number | undefined>(undefined);
@@ -499,24 +501,72 @@ export default function App() {
     );
   };
 
-  const renderLog = () => (
-    <div className="log">
-      <h1 style={{ font: "700 30px/1.05 'Barlow Condensed',sans-serif" }}>Call log</h1>
-      {log.map(c => {
-        const o = OUTCOME[c.outcome] || OUTCOME.none;
-        return (
-          <button key={c.pid + '-' + c.at} className="btn log-item card" onClick={() => open(c.pid)}>
-            <div className="between" style={{ gap: 8 }}>
-              <span style={{ font: "700 17px/1.2 'Barlow',sans-serif" }}>{c.company}</span>
-              <span className="chip" style={{ flex: 'none', background: o.bg, color: o.fg }}>{o.label}</span>
+  const renderLog = () => {
+    const week = T0 - 6 * 86400000;
+    // Everyone who has made a call or added a prospect, with their numbers for today and the last 7 days.
+    const people = new Map<string, { today: number; week: number; good: number; added: number; last: number }>();
+    const row = (n: string) => { if (!people.has(n)) people.set(n, { today: 0, week: 0, good: 0, added: 0, last: 0 }); return people.get(n)!; };
+    if (cloudEnabled) {
+      for (const c of log) {
+        if (!c.by) continue;
+        const r = row(c.by);
+        r.last = Math.max(r.last, c.at);
+        if (c.at >= T0) r.today++;
+        if (c.at >= week) { r.week++; if (c.outcome === 'interested' || c.outcome === 'won') r.good++; }
+      }
+      for (const p of prospects) if (p.addedBy && (p.addedAt || 0) >= week) row(p.addedBy).added++;
+    }
+    const shown = logWho ? log.filter(c => c.by === logWho) : log;
+    const refresh = async () => { setSyncing(true); await sync(); setSyncing(false); };
+    return (
+      <div className="log">
+        <div className="between">
+          <h1 style={{ font: "700 30px/1.05 'Barlow Condensed',sans-serif" }}>Call log</h1>
+          {cloudEnabled && <button className="btn pill" onClick={refresh} style={{ height: 40, padding: '0 16px', borderRadius: 20, fontSize: 14 }}>{syncing ? 'Refreshing…' : 'Refresh'}</button>}
+        </div>
+        {people.size > 0 && (
+          <>
+            <h2 className="h-section">Team progress</h2>
+            {[...people.entries()].sort((a, b) => b[1].week - a[1].week).map(([name, r]) => (
+              <button key={name} className="btn card col" onClick={() => setLogWho(logWho === name ? '' : name)} style={{ borderRadius: 16, padding: '14px 16px', gap: 10, borderColor: logWho === name ? '#C9A45C' : undefined }}>
+                <div className="between">
+                  <span style={{ font: "700 18px/1.1 'Barlow',sans-serif" }}>{name}</span>
+                  <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{r.last ? 'Last call ' + fmtWhen(r.last) : 'No calls yet'}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                  {([[r.today, 'Calls today'], [r.week, 'Calls, 7 days'], [r.good, 'Interested / won'], [r.added, 'Prospects added']] as [number, string][]).map(([n, l]) => (
+                    <div key={l} className="col" style={{ gap: 2 }}>
+                      <b style={{ font: "700 26px/1 'Barlow Condensed',sans-serif", color: l === 'Interested / won' && n ? '#C9A45C' : '#F2EEE6' }}>{n}</b>
+                      <span className="muted" style={{ font: "500 12px/1.2 'Barlow',sans-serif" }}>{l}</span>
+                    </div>
+                  ))}
+                </div>
+              </button>
+            ))}
+            <div className="filters">
+              {['', ...people.keys()].map(n => (
+                <button key={n || 'all'} className="btn toggle" onClick={() => setLogWho(n)} style={{ height: 40, padding: '0 16px', borderRadius: 20, background: selBg(logWho === n), color: selFg(logWho === n) }}>{n || 'Everyone'}</button>
+              ))}
             </div>
-            <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''} · {c.lines.length} transcript lines</span>
-            <span className="pretty" style={{ font: "500 15px/1.4 'Barlow',sans-serif", color: '#CFC8BC' }}>{c.summary}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
+          </>
+        )}
+        {!shown.length && <p className="muted" style={{ font: "500 15px 'Barlow',sans-serif" }}>No calls yet.</p>}
+        {shown.map(c => {
+          const o = OUTCOME[c.outcome] || OUTCOME.none;
+          return (
+            <button key={c.pid + '-' + c.at} className="btn log-item card" onClick={() => open(c.pid)}>
+              <div className="between" style={{ gap: 8 }}>
+                <span style={{ font: "700 17px/1.2 'Barlow',sans-serif" }}>{c.company}</span>
+                <span className="chip" style={{ flex: 'none', background: o.bg, color: o.fg }}>{o.label}</span>
+              </div>
+              <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''} · {c.lines.length} transcript lines</span>
+              <span className="pretty" style={{ font: "500 15px/1.4 'Barlow',sans-serif", color: '#CFC8BC' }}>{c.summary}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderRoute = () => {
     const legs = routeLegs(routeStops, backToYard);
@@ -759,7 +809,7 @@ export default function App() {
     const fields: [keyof AddForm, string, string, string][] = [['company', 'Company', 'text', 'e.g. Perris Valley Grading'], ['contact', 'Contact name', 'text', 'First and last'], ['phone', 'Phone', 'tel', '(951) 555-0100'], ['city', 'City', 'text', 'e.g. Menifee']];
     const save = () => {
       if (!canSave) return;
-      persist([{ id: Date.now(), company: add.company!, contact: (add.contact || '').trim(), phone: add.phone!.replace(/\D/g, ''), type: add.type || 'Hauler', city: add.city || '', interest: add.interest || 'Both', status: 'new', next: null, calls: [] }, ...prospects]);
+      persist([{ id: Date.now(), addedAt: Date.now(), addedBy: me?.name, company: add.company!, contact: (add.contact || '').trim(), phone: add.phone!.replace(/\D/g, ''), type: add.type || 'Hauler', city: add.city || '', interest: add.interest || 'Both', status: 'new', next: null, calls: [] }, ...prospects]);
       setAdd(null);
     };
     const opts = (list: string[], k: 'type' | 'interest') => (
