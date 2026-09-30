@@ -5,7 +5,7 @@ import {
   type BriefItem, type Line, type StatusKey, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
-import { addMember, cloudEnabled, diffOps, downloadBackup, enqueue, flush, mergeLocalOnce, snapshotLocal, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
+import { addMember, loadUserState, saveUserState, cloudEnabled, diffOps, downloadBackup, enqueue, flush, mergeLocalOnce, snapshotLocal, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
 import bundledProspects from './prospects.json';
 import logoUrl from './monarch-logo.webp';
 
@@ -23,7 +23,13 @@ const loadProspects = (): Prospect[] => {
   } catch { /* fall through to bundled list */ }
   return bundledProspects as Prospect[];
 };
-const BUNDLED_IDS = new Set((bundledProspects as Prospect[]).map(p => p.id));
+// A call that hasn't been saved yet survives the app being closed (e.g. Android unloading it while the dialer is up).
+const DRAFT_KEY = 'monarch-call-draft';
+interface Draft { activeId: number; call: LiveCall; wrap: Wrap | null; prev: Screen; wasDrive: boolean; savedAt: number }
+const readDraft = (): Draft | null => { try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); return d && d.call && d.activeId ? d : null; } catch { return null; } };
+const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+const draft0 = readDraft();
+
 const readBriefAt = () => { try { return localStorage.getItem(BRIEF_AT_KEY); } catch { return null; } };
 const readRoute = (): number[] => { try { const r = JSON.parse(localStorage.getItem(ROUTE_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch { return []; } };
 const readRouteHome = () => { try { return localStorage.getItem(ROUTE_HOME_KEY) !== '0'; } catch { return true; } };
@@ -63,16 +69,16 @@ const TranscriptLine = ({ l, live }: { l: Line; live?: boolean }) => (
 
 export default function App() {
   const [prospects, setProspects] = useState<Prospect[]>(loadProspects);
-  const [screen, setScreen] = useState<Screen>('today');
-  const [prev, setPrev] = useState<Screen>('today');
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [screen, setScreen] = useState<Screen>(draft0 ? 'wrap' : 'today');
+  const [prev, setPrev] = useState<Screen>(draft0 ? draft0.prev : 'today');
+  const [activeId, setActiveId] = useState<number | null>(draft0 ? draft0.activeId : null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [openCall, setOpenCall] = useState<number | null>(null);
-  const [call, setCall] = useState<LiveCall | null>(null);
+  const [call, setCall] = useState<LiveCall | null>(draft0 ? { ...draft0.call, secs: draft0.wrap ? draft0.call.secs : Math.round((draft0.savedAt - draft0.call.start) / 1000) } : null);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
-  const [wrap, setWrap] = useState<Wrap | null>(null);
+  const [wrap, setWrap] = useState<Wrap | null>(draft0 ? draft0.wrap || { outcome: null, follow: null, note: '', summary: summarize(draft0.call.lines) } : null);
   const [dictating, setDictating] = useState(false);
   const [driveIdx, setDriveIdx] = useState(0);
   const [voice, setVoice] = useState(false);
@@ -100,7 +106,7 @@ export default function App() {
 
   const timer = useRef<number | undefined>(undefined);
   const demo = useRef<number | undefined>(undefined);
-  const wasDrive = useRef(false);
+  const wasDrive = useRef(!!draft0?.wasDrive);
   const driveQueue = useRef<Prospect[] | null>(null);
   const driveIdxRef = useRef(0);
   driveIdxRef.current = driveIdx;
@@ -137,7 +143,7 @@ export default function App() {
 
   // Shows the team list; the first time, this phone's own earlier work (calls, added prospects) is merged in and uploaded.
   async function adopt(list: Prospect[], m: Member) {
-    const merged = mergeLocalOnce(list, m, BUNDLED_IDS, normName);
+    const merged = mergeLocalOnce(list, m, bundledProspects as Prospect[], normName);
     showServerList(merged || list);
     if (merged) { await flush(); setPending(pendingCount()); }
   }
@@ -155,6 +161,11 @@ export default function App() {
       try {
         const list = await loadTeamList();
         await adopt(list, m);
+        const st = await loadUserState();
+        if (live && st && Array.isArray(st.route)) {
+          setRoute(st.route); setBackToYard(st.backToYard !== false);
+          try { localStorage.setItem(ROUTE_KEY, JSON.stringify(st.route)); localStorage.setItem(ROUTE_HOME_KEY, st.backToYard === false ? '0' : '1'); } catch { /* ignore */ }
+        }
       } catch { /* offline: keep the on-phone copy until the next sync */ }
     })();
     return () => { live = false; };
@@ -169,6 +180,12 @@ export default function App() {
     return () => { document.removeEventListener('visibilitychange', onShow); window.removeEventListener('online', onShow); clearInterval(every); };
   }, []);
   useEffect(() => () => { clearInterval(timer.current); clearInterval(demo.current); stopRec(); }, []);
+
+  // Keep the call in progress (transcript, outcome, notes) on the phone until it is saved.
+  useEffect(() => {
+    if ((screen !== 'call' && screen !== 'wrap') || !call || activeId == null) return;
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ activeId, call, wrap: screen === 'wrap' ? wrap : null, prev, wasDrive: wasDrive.current, savedAt: Date.now() })); } catch { /* ignore */ }
+  }, [screen, call, wrap, activeId, prev]);
 
   // Pick up the morning briefing that the scheduled Claude run publishes, whenever the app comes to the front.
   useEffect(() => {
@@ -200,7 +217,11 @@ export default function App() {
   const cur = prospects.find(p => p.id === activeId);
 
   // ---- drive route ----
-  const saveRoute = (ids: number[]) => { setRoute(ids); try { localStorage.setItem(ROUTE_KEY, JSON.stringify(ids)); } catch { /* ignore */ } };
+  const saveRoute = (ids: number[], home = backToYard) => {
+    setRoute(ids);
+    try { localStorage.setItem(ROUTE_KEY, JSON.stringify(ids)); } catch { /* ignore */ }
+    if (cloudEnabled && meRef.current) saveUserState(meRef.current.email, { route: ids, backToYard: home });
+  };
   const toggleRoute = (id: number) => saveRoute(route.includes(id) ? route.filter(x => x !== id) : [...route, id]);
   const routeStops = route.map(id => prospects.find(p => p.id === id)).filter((p): p is Prospect => !!p);
 
@@ -265,6 +286,7 @@ export default function App() {
     }));
     const fromDrive = prev === 'drive' || wasDrive.current;
     setWrap(null); setCall(null); setDictating(false);
+    clearDraft();
     if (fromDrive) {
       wasDrive.current = false;
       setScreen('drive');
@@ -577,7 +599,7 @@ export default function App() {
       .filter(p => !route.includes(p.id) && p.status !== 'notnow' && (p.top || (p.score || 0) >= candMin) && (!candCity || (p.city || '').trim() === candCity))
       .sort((a, b) => (b.top ? 1 : 0) - (a.top ? 1 : 0) || (b.score || 0) - (a.score || 0) || a.company.localeCompare(b.company));
     const move = (i: number, d: number) => { const ids = routeStops.map(p => p.id), j = i + d; [ids[i], ids[j]] = [ids[j], ids[i]]; saveRoute(ids); };
-    const setHome = (on: boolean) => { setBackToYard(on); try { localStorage.setItem(ROUTE_HOME_KEY, on ? '1' : '0'); } catch { /* ignore */ } };
+    const setHome = (on: boolean) => { setBackToYard(on); try { localStorage.setItem(ROUTE_HOME_KEY, on ? '1' : '0'); } catch { /* ignore */ } saveRoute(route, on); };
     const select = { height: 48, borderRadius: 12, border: '1px solid #2E2A24', background: '#1A1815', color: '#F2EEE6', padding: '0 12px', font: "500 16px 'Barlow',sans-serif", width: '100%' };
     return (
       <div className="route">
@@ -712,6 +734,8 @@ export default function App() {
           <button className="btn btn-gold" onClick={saveWrap} style={{ width: '100%', height: 64, borderRadius: 18, font: "800 24px/1 'Barlow Condensed',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase' }}>
             {wasDrive.current ? 'Save & next call' : 'Save call'}
           </button>
+          <button className="btn" onClick={() => { if (!window.confirm('Discard this call without saving it?')) return; stopRec(); clearDraft(); setWrap(null); setCall(null); setDictating(false); setScreen(activeId != null ? 'detail' : 'today'); }}
+            style={{ width: '100%', height: 36, marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "600 14px 'Barlow',sans-serif", color: '#8A8276' }}>Discard this call</button>
         </div>
       </div>
     );

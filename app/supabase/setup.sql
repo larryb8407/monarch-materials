@@ -72,3 +72,15 @@ begin
 end $$;
 drop trigger if exists gate_signup on auth.users;
 create trigger gate_signup before insert on auth.users for each row execute function public.gate_signup();
+
+-- Per-person settings kept in the cloud (each person's drive route). Added later; safe to run on its own.
+create table if not exists public.user_state (
+  email text primary key default lower(auth.jwt() ->> 'email'),
+  data jsonb not null default '{}',
+  updated_at timestamptz not null default now()
+);
+alter table public.user_state enable row level security;
+drop policy if exists user_state_own on public.user_state;
+create policy user_state_own on public.user_state for all to authenticated
+  using (email = lower(auth.jwt() ->> 'email') and public.my_role() is not null)
+  with check (email = lower(auth.jwt() ->> 'email') and public.my_role() is not null);

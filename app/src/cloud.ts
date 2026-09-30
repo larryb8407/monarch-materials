@@ -47,6 +47,7 @@ let flushing: Promise<string | null> | null = null;
 /** Uploads queued changes in order. Stops at the first network failure and keeps the rest for later. Returns an error message for rejected changes. */
 export function flush(): Promise<string | null> {
   if (!sb) return Promise.resolve(null);
+  // Cleared in finally, after the assignment: when there is nothing to send the body finishes before `flushing` is even set.
   if (!flushing) flushing = (async () => {
     let rejected: string | null = null;
     for (;;) {
@@ -63,9 +64,8 @@ export function flush(): Promise<string | null> {
       if (error) rejected = error.message;
       writeOutbox(readOutbox().slice(n));
     }
-    flushing = null;
     return rejected;
-  })();
+  })().finally(() => { flushing = null; });
   return flushing;
 }
 
@@ -174,12 +174,15 @@ export function snapshotLocal(storageKey: string) {
  * prospects that were added on this phone or have calls. Returns the merged list (the changes are queued for upload).
  * `bundled` is the starter list shipped with the app, so untouched starter prospects the owner deleted don't come back.
  */
-export function mergeLocalOnce(server: Prospect[], member: Member, bundled: Set<number>, normName: (s: string) => string): Prospect[] | null {
+export function mergeLocalOnce(server: Prospect[], member: Member, starter: Prospect[], normName: (s: string) => string): Prospect[] | null {
+  const bundled = new Set(starter.map(p => p.id));
   let local: Prospect[] = [];
   try {
     if (localStorage.getItem(MERGED_KEY)) return null;
     local = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]');
   } catch { return null; }
+  // Owner starting the team list from a device with nothing saved: start from the list that ships with the app.
+  if (!server.length && member.role === 'owner' && !(Array.isArray(local) && local.length)) local = starter;
   const everything = member.role === 'owner';
   const merged = server.map(p => ({ ...p, calls: [...p.calls] }));
   const byId = new Map(merged.map(p => [p.id, p]));
@@ -226,4 +229,16 @@ export function downloadBackup(list: Prospect[]) {
     ['date', 'company', 'by', 'outcome', 'minutes', 'summary', 'transcript'],
     ...list.flatMap(p => p.calls.map(c => [new Date(c.at).toLocaleString(), p.company, c.by, c.outcome, (c.secs / 60).toFixed(1), c.summary, c.lines.map(l => `${l.who}: ${l.text}`).join('\n')])),
   ])), 800);
+}
+
+// ---- per-person settings (drive route) ----
+export interface UserState { route?: number[]; backToYard?: boolean }
+export async function loadUserState(): Promise<UserState | null> {
+  if (!sb) return null;
+  const { data } = await sb.from('user_state').select('data').maybeSingle();
+  return (data?.data as UserState) || null;
+}
+/** Best effort: the route is also kept on the phone, so a failed save only loses it on other devices. */
+export function saveUserState(email: string, state: UserState) {
+  sb?.from('user_state').upsert({ email: email.toLowerCase(), data: state, updated_at: new Date().toISOString() }).then(() => {}, () => {});
 }
