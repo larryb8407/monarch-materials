@@ -155,3 +155,75 @@ export async function removeMember(email: string): Promise<string | null> {
   const { error } = await sb!.from('team').delete().eq('email', email);
   return error ? friendly(error.message) : null;
 }
+
+// ---- carrying over what was saved on this phone before team sign-in ----
+const BACKUP_KEY = 'monarch-local-backup';
+const MERGED_KEY = 'monarch-local-merged';
+
+/** Before the team list first replaces this phone's copy, keep the phone's own list under a separate key. */
+export function snapshotLocal(storageKey: string) {
+  try {
+    if (localStorage.getItem(BACKUP_KEY) || localStorage.getItem(MERGED_KEY)) return;
+    const raw = localStorage.getItem(storageKey);
+    if (raw) localStorage.setItem(BACKUP_KEY, raw);
+  } catch { /* ignore */ }
+}
+
+/**
+ * Adds this phone's pre-sign-in work to the team list, once: calls the team list doesn't have yet, and
+ * prospects that were added on this phone or have calls. Returns the merged list (the changes are queued for upload).
+ * `bundled` is the starter list shipped with the app, so untouched starter prospects the owner deleted don't come back.
+ */
+export function mergeLocalOnce(server: Prospect[], member: Member, bundled: Set<number>, normName: (s: string) => string): Prospect[] | null {
+  let local: Prospect[] = [];
+  try {
+    if (localStorage.getItem(MERGED_KEY)) return null;
+    local = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]');
+  } catch { return null; }
+  const everything = member.role === 'owner';
+  const merged = server.map(p => ({ ...p, calls: [...p.calls] }));
+  const byId = new Map(merged.map(p => [p.id, p]));
+  const byName = new Map(merged.map(p => [normName(p.company), p]));
+  for (const lp of Array.isArray(local) ? local : []) {
+    const calls = (lp.calls || []).map(c => ({ ...c, by: c.by || member.name }));
+    const match = byId.get(lp.id) || byName.get(normName(lp.company));
+    if (!match) {
+      if (everything || calls.length || !bundled.has(lp.id)) {
+        const np = { ...lp, calls, addedBy: lp.addedBy || (bundled.has(lp.id) ? undefined : member.name) };
+        merged.unshift(np); byId.set(np.id, np); byName.set(normName(np.company), np);
+      }
+      continue;
+    }
+    const have = new Set(match.calls.map(callId));
+    for (const c of calls) if (!have.has(callId(c))) match.calls.push(c);
+    match.calls.sort((a, b) => b.at - a.at);
+  }
+  enqueue(diffOps(server, merged, member.name));
+  try { localStorage.setItem(MERGED_KEY, String(Date.now())); } catch { /* ignore */ }
+  return merged;
+}
+
+// ---- backup download ----
+const csv = (rows: (string | number | undefined | null)[][]) =>
+  rows.map(r => r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')).join('\n');
+
+function download(name: string, text: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/** Two spreadsheets: the prospect list (same columns the Update list import reads) and every logged call. */
+export function downloadBackup(list: Prospect[]) {
+  const day = new Date().toISOString().slice(0, 10);
+  download(`monarch-prospects-${day}.csv`, csv([
+    ['company', 'contact', 'title', 'phone', 'email', 'category', 'city', 'address', 'priority', 'demo', 'lead', 'notes', 'status', 'next', 'interest', 'addedBy'],
+    ...list.map(p => [p.company, p.contact, p.title, p.phone, p.email, p.type, p.city, p.address, p.top ? 'Most important' : '', p.score, p.lead, p.notes, p.status, p.next, p.interest, p.addedBy]),
+  ]));
+  setTimeout(() => download(`monarch-calls-${day}.csv`, csv([
+    ['date', 'company', 'by', 'outcome', 'minutes', 'summary', 'transcript'],
+    ...list.flatMap(p => p.calls.map(c => [new Date(c.at).toLocaleString(), p.company, c.by, c.outcome, (c.secs / 60).toFixed(1), c.summary, c.lines.map(l => `${l.who}: ${l.text}`).join('\n')])),
+  ])), 800);
+}

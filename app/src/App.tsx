@@ -5,7 +5,7 @@ import {
   type BriefItem, type Line, type StatusKey, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
-import { addMember, cloudEnabled, diffOps, enqueue, flush, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
+import { addMember, cloudEnabled, diffOps, downloadBackup, enqueue, flush, mergeLocalOnce, snapshotLocal, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
 import bundledProspects from './prospects.json';
 import logoUrl from './monarch-logo.webp';
 
@@ -23,6 +23,7 @@ const loadProspects = (): Prospect[] => {
   } catch { /* fall through to bundled list */ }
   return bundledProspects as Prospect[];
 };
+const BUNDLED_IDS = new Set((bundledProspects as Prospect[]).map(p => p.id));
 const readBriefAt = () => { try { return localStorage.getItem(BRIEF_AT_KEY); } catch { return null; } };
 const readRoute = (): number[] => { try { const r = JSON.parse(localStorage.getItem(ROUTE_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch { return []; } };
 const readRouteHome = () => { try { return localStorage.getItem(ROUTE_HOME_KEY) !== '0'; } catch { return true; } };
@@ -131,12 +132,20 @@ export default function App() {
     const err = await flush();
     setPending(pendingCount());
     if (err) setSyncError(err);
-    try { showServerList(await loadTeamList()); } catch { /* offline: keep the on-phone copy */ }
+    try { await adopt(await loadTeamList(), meRef.current); } catch { /* offline: keep the on-phone copy */ }
+  }
+
+  // Shows the team list; the first time, this phone's own earlier work (calls, added prospects) is merged in and uploaded.
+  async function adopt(list: Prospect[], m: Member) {
+    const merged = mergeLocalOnce(list, m, BUNDLED_IDS, normName);
+    showServerList(merged || list);
+    if (merged) { await flush(); setPending(pendingCount()); }
   }
 
   useEffect(() => {
     if (!cloudEnabled) return;
     if (!email) { setMe(null); setMeChecked(false); return; }
+    snapshotLocal(STORAGE_KEY);
     let live = true;
     (async () => {
       const m = await loadMe(email).catch(() => null);
@@ -145,14 +154,7 @@ export default function App() {
       if (!m) return;
       try {
         const list = await loadTeamList();
-        if (!list.length && m.role === 'owner') {
-          // First owner sign-in: the list on this phone (with its call history) becomes the team list.
-          const local = loadProspects();
-          enqueue(diffOps([], local, m.name));
-          showServerList(local);
-          await flush();
-          setPending(pendingCount());
-        } else showServerList(list);
+        await adopt(list, m);
       } catch { /* offline: keep the on-phone copy until the next sync */ }
     })();
     return () => { live = false; };
@@ -905,6 +907,11 @@ export default function App() {
             <span className="b">{pending ? `${pending} change${pending > 1 ? 's' : ''} waiting for signal. They upload automatically.` : 'Everything is saved to the team list.'}</span>
             {syncError && <span style={{ font: "600 14px/1.4 'Barlow',sans-serif", color: '#F08A80' }}>Last error: {syncError}</span>}
             <button className="btn link-btn" onClick={() => sync()} style={{ alignSelf: 'flex-start' }}>Sync now</button>
+          </div>
+          <div className="info-card card">
+            <span className="t muted">Backup</span>
+            <span className="b">Download the prospect list and every call (with transcripts) as two spreadsheets you can keep.</span>
+            <button className="btn link-btn" onClick={() => downloadBackup(prospects)} style={{ alignSelf: 'flex-start' }}>Download backup</button>
           </div>
           {me.role === 'owner' && <TeamManager team={team} me={me} onChanged={() => setTeam(null)} />}
           <button className="btn btn-outline" onClick={() => { setAccount(false); setTeam(null); signOut(); }} style={{ height: 52, borderRadius: 14, borderColor: '#3A352E', color: '#F08A80' }}>Sign out</button>
