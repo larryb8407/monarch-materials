@@ -9,7 +9,7 @@ import { addMember, loadUserState, saveUserState, cloudEnabled, diffOps, downloa
 import bundledProspects from './prospects.json';
 import logoUrl from './monarch-logo.webp';
 
-type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'route' | 'call' | 'wrap' | 'drive';
+type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'route' | 'teamday' | 'call' | 'wrap' | 'drive';
 type Filter = 'all' | 'top' | 'new' | 'follow' | 'customer';
 interface LiveCall { start: number; secs: number; lines: Line[] }
 interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string; attention?: boolean; attentionNote?: string }
@@ -372,7 +372,7 @@ export default function App() {
 
   // ---- rendering ----
   const showChrome = !['call', 'wrap', 'drive'].includes(screen);
-  const tabKey = screen === 'detail' ? prev : screen;
+  const tabKey = screen === 'detail' ? (prev === 'teamday' ? 'today' : prev) : screen === 'teamday' ? 'today' : screen;
   const briefLabel = briefAt ? 'Last updated ' + fmtWhen(+briefAt) : 'Not updated yet';
 
   const q = search.toLowerCase();
@@ -389,7 +389,11 @@ export default function App() {
         <h1>{queue.length} calls in today's queue</h1>
       </div>
       <div className="grid2">
-        <div className="stat card"><b>{callsToday}</b><span>{cloudEnabled && isOwner ? 'Team calls today' : 'Calls made today'}</span></div>
+        {cloudEnabled && isOwner
+          ? <button className="btn stat card" onClick={() => setScreen('teamday')} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <b>{callsToday}</b><span>Team calls today ›</span>
+            </button>
+          : <div className="stat card"><b>{callsToday}</b><span>Calls made today</span></div>}
         <div className="stat card"><b style={{ color: '#D9B872' }}>{prospects.filter(p => p.next && p.next <= today).length}</b><span>Follow-ups due</span></div>
       </div>
       {attention.length > 0 && (
@@ -549,6 +553,62 @@ export default function App() {
             );
           })}
         </div>
+      </div>
+    );
+  };
+
+  // Owner only: everything the team did today, newest first.
+  const renderTeamDay = () => {
+    type Item = { at: number; by: string; pid: number; company: string; kind: 'call' | 'added' | 'flag'; label: string; bg: string; fg: string; text: string };
+    const items: Item[] = [];
+    for (const p of prospects) {
+      for (const c of p.calls) {
+        if (c.at < T0) continue;
+        const o = OUTCOME[c.outcome] || OUTCOME.none;
+        items.push({ at: c.at, by: c.by || 'Unknown', pid: p.id, company: p.company, kind: 'call', label: o.label, bg: o.bg, fg: o.fg, text: c.summary });
+      }
+      if ((p.addedAt || 0) >= T0) items.push({ at: p.addedAt!, by: p.addedBy || 'Briefing', pid: p.id, company: p.company, kind: 'added', label: 'New prospect', bg: '#1B2533', fg: '#9CC0EA', text: p.lead || [p.type, p.city].filter(Boolean).join(' · ') });
+      if (p.attention && p.attention.at >= T0) items.push({ at: p.attention.at, by: p.attention.by, pid: p.id, company: p.company, kind: 'flag', label: `Attention ${OWNER_NAME}`, bg: '#E07B24', fg: '#0E0D0B', text: p.attention.note || 'Asked you to call back.' });
+    }
+    items.sort((a, b) => b.at - a.at);
+    const people = new Map<string, { calls: number; good: number; added: number }>();
+    for (const it of items) {
+      if (!people.has(it.by)) people.set(it.by, { calls: 0, good: 0, added: 0 });
+      const r = people.get(it.by)!;
+      if (it.kind === 'call') { r.calls++; if (it.label === 'Interested' || it.label === 'Won') r.good++; }
+      if (it.kind === 'added') r.added++;
+    }
+    const refresh = async () => { setSyncing(true); await sync(); setSyncing(false); };
+    return (
+      <div className="log">
+        <div className="between">
+          <button className="btn back" onClick={() => setScreen('today')}>← Today</button>
+          <button className="btn pill" onClick={refresh} style={{ height: 40, padding: '0 16px', borderRadius: 20, fontSize: 14 }}>{syncing ? 'Refreshing…' : 'Refresh'}</button>
+        </div>
+        <h1 style={{ font: "700 30px/1.05 'Barlow Condensed',sans-serif" }}>Team today</h1>
+        {people.size > 0 && (
+          <div className="col" style={{ gap: 8 }}>
+            {[...people.entries()].sort((a, b) => b[1].calls - a[1].calls).map(([name, r]) => (
+              <div key={name} className="card between" style={{ borderRadius: 14, padding: '12px 16px', gap: 10 }}>
+                <span style={{ font: "700 16px 'Barlow',sans-serif" }}>{name}</span>
+                <span className="muted" style={{ font: "600 14px 'Barlow',sans-serif" }}>
+                  <b style={{ color: '#F2EEE6' }}>{r.calls}</b> calls · <b style={{ color: r.good ? '#C9A45C' : '#F2EEE6' }}>{r.good}</b> interested/won · <b style={{ color: '#F2EEE6' }}>{r.added}</b> added
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!items.length && <div className="empty">Nothing yet today. Calls, new prospects and Attention {OWNER_NAME} requests show up here as the team works.</div>}
+        {items.map((it, i) => (
+          <button key={it.kind + it.pid + '-' + it.at + '-' + i} className="btn log-item card" onClick={() => open(it.pid)}>
+            <div className="between" style={{ gap: 8 }}>
+              <span style={{ font: "700 17px/1.2 'Barlow',sans-serif" }}>{it.company}</span>
+              <span className="chip" style={{ flex: 'none', background: it.bg, color: it.fg }}>{it.label}</span>
+            </div>
+            <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{new Date(it.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {it.by}</span>
+            {it.text && <span className="pretty" style={{ font: "500 15px/1.4 'Barlow',sans-serif", color: '#CFC8BC' }}>{it.kind === 'flag' ? `“${it.text}”` : it.text}</span>}
+          </button>
+        ))}
       </div>
     );
   };
@@ -1023,6 +1083,7 @@ export default function App() {
         {screen === 'detail' && renderDetail()}
         {screen === 'log' && renderLog()}
         {screen === 'route' && renderRoute()}
+        {screen === 'teamday' && isOwner && renderTeamDay()}
       </main>
       {showChrome && (
         <nav className="tabs">
