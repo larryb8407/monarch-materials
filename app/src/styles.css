@@ -132,7 +132,6 @@ h1, h2, p { margin: 0; }
 .rec { display: flex; align-items: center; gap: 8px; font: 700 13px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
 .rec i { width: 10px; height: 10px; border-radius: 50%; background: var(--gold); animation: mmRec 1.2s infinite; }
 .timer { font: 700 26px/1 var(--cond); font-variant-numeric: tabular-nums; }
-.transcript { flex: 1; min-height: 0; overflow-y: auto; margin: 18px 0; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid #2E2921; padding-top: 16px; }
 .end-call { height: 72px; border-radius: 20px; background: var(--red); color: #fff; display: flex; align-items: center; justify-content: center; font: 800 26px/1 var(--cond); letter-spacing: .06em; text-transform: uppercase; }
 .end-call:active { transform: scale(.97); }
 

@@ -84,3 +84,14 @@ drop policy if exists user_state_own on public.user_state;
 create policy user_state_own on public.user_state for all to authenticated
   using (email = lower(auth.jwt() ->> 'email') and public.my_role() is not null)
   with check (email = lower(auth.jwt() ->> 'email') and public.my_role() is not null);
+
+-- Live updates: send prospect and call changes to every signed-in phone right away. Safe to run again.
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'prospects') then
+    alter publication supabase_realtime add table public.prospects;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'calls') then
+    alter publication supabase_realtime add table public.calls;
+  end if;
+end $$;

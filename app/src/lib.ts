@@ -29,6 +29,8 @@ export interface Prospect {
   addedBy?: string;
   /** A team member asked the owner to call this prospect back. Cleared when the owner calls or marks it handled. */
   attention?: { by: string; at: number; note?: string } | null;
+  /** Someone on the team tapped CALL on this prospect and hasn't saved the call yet. */
+  calling?: { by: string; at: number } | null;
   calls: Call[];
 }
 
@@ -43,8 +45,6 @@ export const BRIEF_SEEN_KEY = 'monarch-brief-seen';
 
 /** After a call saved from Drive Mode, advance to the next prospect. */
 export const DRIVE_AUTO_NEXT = true;
-/** On a desktop browser (no dialer), play a scripted conversation so the call screen can be tried out. */
-export const DEMO_TRANSCRIPT = true;
 
 /** Who the Attention button on the wrap-up screen asks to call back. */
 export const OWNER_NAME = 'Larry';
@@ -95,16 +95,6 @@ export const seedProspects = (): Prospect[] => {
   ];
 };
 
-export const DEMO: Line[] = [
-  { who: 'You', text: 'Hi, this is with Monarch Materials in Perris. Got a minute?' },
-  { who: 'Them', text: 'Sure, what do you have?' },
-  { who: 'You', text: 'We take clean broken concrete and asphalt, and we sell recycled crushed aggregate base.' },
-  { who: 'Them', text: 'We have about 30 loads of concrete coming off a job in Lake Elsinore.' },
-  { who: 'You', text: 'We can take all of it. 10 wheelers, super 10s, end dumps are all fine.' },
-  { who: 'Them', text: 'What are you charging per load? Send me the pricing.' },
-  { who: 'You', text: 'I will text you the pricing page right after this call.' },
-  { who: 'Them', text: 'Sounds good. Call me Thursday and we can set it up.' },
-];
 
 export const CLAUDE_BRIEF_PROMPT = "Search the web for new concrete and asphalt demolition, paving, storm drain, airport and public works jobs in Riverside County and the Inland Empire announced or awarded in the last 7 days, plus the contractors who won or are bidding them. I run Monarch Materials, a concrete and asphalt recycling yard at 1920 Goetz Rd, Perris, CA. Return ONLY a CSV (no other text) with this exact header: company,contact,title,phone,email,category,city,address,priority,demo,lead,notes. Set priority to 'Most important' for large demo volume or jobs within 20 miles of Perris. demo is a 0-100 score for how much concrete/asphalt they could bring me. lead is one sentence on the new work. Only include real, verifiable info and leave unknown fields blank.";
 
@@ -152,18 +142,29 @@ export const fmtWhen = (t: number) => {
 
 export const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
 
-/** Pulls the lines that mention quantities, pricing or next steps out of a transcript. */
-export const summarize = (lines: Line[]) => {
-  if (!lines.length) return 'No transcript captured.';
-  const them = lines.filter(l => l.who !== 'You');
-  const key = (them.length ? them : lines).filter(l => /\d|load|ton|price|pricing|call|send|job|base|week|monday|tuesday|wednesday|thursday|friday/i.test(l.text));
-  return (key.length ? key : them.length ? them : lines).slice(0, 3).map(l => (/[.?!]$/.test(l.text) ? l.text : l.text + '.')).join(' ');
-};
+const DAY_MS = 86400000;
+/** How long a CALL tap marks a prospect as "being called" if the call is never saved. */
+export const CALLING_TTL = 30 * 60000;
+export const callingNow = (p: Prospect) => (p.calling && Date.now() - p.calling.at < CALLING_TTL ? p.calling : null);
+/** Called by anyone in the last 7 days: off the queue until its follow-up date comes up. */
+export const recentlyCalled = (p: Prospect) => !!p.calls[0] && Date.now() - p.calls[0].at < 7 * DAY_MS;
 
-/** Call queue order: (for the owner) prospects flagged for their attention, pinned top leads, then due follow-ups, then new, then open follow-ups; ties by top priority and score. */
+/**
+ * Call queue order: (for the owner) prospects flagged for their attention, pinned top leads, then due follow-ups,
+ * then new, then open follow-ups; ties by top priority and score. Prospects someone is calling right now, or that
+ * were called in the last week and have no follow-up due, are left out so two people don't call the same company.
+ */
 export const queueList = (prospects: Prospect[], ownerView = false) => {
   const today = rel(0);
-  const rank = (p: Prospect) => (ownerView && p.attention ? -2 : p.pinned ? -1 : p.next && p.next <= today ? 0 : p.status === 'new' ? 1 : p.status === 'interested' || p.status === 'follow' ? 2 : 9);
+  const rank = (p: Prospect) => {
+    if (ownerView && p.attention) return -2;
+    if (callingNow(p)) return 9;
+    const due = !!p.next && p.next <= today;
+    if (p.pinned && !recentlyCalled(p)) return -1;
+    if (due) return 0;
+    if (recentlyCalled(p)) return 9;
+    return p.status === 'new' ? 1 : p.status === 'interested' || p.status === 'follow' ? 2 : 9;
+  };
   return prospects.filter(p => rank(p) < 9).sort((a, b) => rank(a) - rank(b) || (b.pinned || 0) - (a.pinned || 0) || (b.top ? 1 : 0) - (a.top ? 1 : 0) || (b.score || 0) - (a.score || 0));
 };
 
@@ -173,9 +174,9 @@ export const decorate = (p: Prospect) => {
   const due = !!p.next && p.next <= rel(0);
   const first = p.contact ? p.contact.split(' ')[0] : '';
   return {
-    statusLabel: p.attention ? `Attention ${OWNER_NAME}` : p.pinned ? 'New top lead' : due ? 'Due today' : st.label,
-    chipBg: p.attention ? '#E07B24' : p.pinned ? '#D6362B' : due ? '#C9A45C' : st.bg,
-    chipFg: p.attention ? '#0E0D0B' : p.pinned ? '#fff' : due ? '#0E0D0B' : st.fg,
+    statusLabel: callingNow(p) ? `${p.calling!.by} calling…` : p.attention ? `Attention ${OWNER_NAME}` : p.pinned ? 'New top lead' : due ? 'Due today' : st.label,
+    chipBg: callingNow(p) ? '#2B5C8A' : p.attention ? '#E07B24' : p.pinned ? '#D6362B' : due ? '#C9A45C' : st.bg,
+    chipFg: callingNow(p) ? '#fff' : p.attention ? '#0E0D0B' : p.pinned ? '#fff' : due ? '#0E0D0B' : st.fg,
     lastLabel: last ? 'Last call ' + fmtWhen(last.at) : 'Never called',
     lastSummary: last ? last.summary : (p.lead || `${p.type} · interested in ${(p.interest || '').toLowerCase()}`),
     contact: p.contact || p.title || 'Main line',

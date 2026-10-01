@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
-  BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DEMO, DEMO_TRANSCRIPT, DRIVE_AUTO_NEXT, OUTCOME, STORAGE_KEY,
-  ROUTE_HOME_KEY, ROUTE_KEY, OWNER_NAME, decorate, fetchAutoBrief, fmtPhone, placeOf, routeLegs, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, summarize, toProspect,
+  BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DRIVE_AUTO_NEXT, OUTCOME, STATUS, STORAGE_KEY, callingNow, recentlyCalled,
+  ROUTE_HOME_KEY, ROUTE_KEY, OWNER_NAME, decorate, fetchAutoBrief, fmtPhone, placeOf, routeLegs, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, toProspect,
   type BriefItem, type Line, type StatusKey, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
-import { addMember, loadUserState, saveUserState, cloudEnabled, diffOps, downloadBackup, enqueue, flush, mergeLocalOnce, snapshotLocal, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
+import { addMember, loadUserState, saveUserState, watchTeamChanges, cloudEnabled, diffOps, downloadBackup, enqueue, flush, mergeLocalOnce, snapshotLocal, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
 import bundledProspects from './prospects.json';
 import logoUrl from './monarch-logo.webp';
 
 type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'route' | 'teamday' | 'call' | 'wrap' | 'drive';
-type Filter = 'all' | 'top' | 'new' | 'follow' | 'customer';
+type Filter = 'all' | 'mine' | 'top' | 'new' | 'follow' | 'customer';
 interface LiveCall { start: number; secs: number; lines: Line[] }
 interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string; attention?: boolean; attentionNote?: string }
 interface Brief { step: 'input' | 'review'; text: string; busy: boolean; error: string; auto?: string; added?: BriefItem[]; updated?: (BriefItem & { id: number })[] }
@@ -32,10 +32,13 @@ const draft0 = readDraft();
 
 const readBriefAt = () => { try { return localStorage.getItem(BRIEF_AT_KEY); } catch { return null; } };
 const readRoute = (): number[] => { try { const r = JSON.parse(localStorage.getItem(ROUTE_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch { return []; } };
+const MYLIST_KEY = 'monarch-mylist';
+const readMyList = (): number[] => { try { const r = JSON.parse(localStorage.getItem(MYLIST_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch { return []; } };
+/** "Update without calling" panel on the prospect page. */
+interface Upd { status: StatusKey; next: string | null; note: string; attention: boolean; attentionNote: string }
 const readRouteHome = () => { try { return localStorage.getItem(ROUTE_HOME_KEY) !== '0'; } catch { return true; } };
 const readSeen = () => { try { return localStorage.getItem(BRIEF_SEEN_KEY); } catch { return null; } };
 
-const whoColor = (w: string, live: boolean) => (w === 'You' ? '#C9A45C' : w === 'Them' ? (live ? '#7FB2E5' : '#9CC0EA') : (live ? '#B8AE9F' : '#A39A8C'));
 const selBg = (on: boolean) => (on ? '#C9A45C' : '#1A1815');
 const selFg = (on: boolean) => (on ? '#0E0D0B' : '#F2EEE6');
 
@@ -43,12 +46,12 @@ const PinIcon = () => <svg viewBox="0 0 24 24" width="20" height="20" fill="curr
 
 const Chip = ({ bg, fg, label }: { bg: string; fg: string; label: string }) => <span className="chip" style={{ background: bg, color: fg }}>{label}</span>;
 
-const ProspectRow = ({ p, compact, onOpen, onCall, onRoute, routed }: { p: Prospect; compact?: boolean; onOpen: (id: number) => void; onCall: (id: number) => void; onRoute: (id: number) => void; routed: boolean }) => {
+const ProspectRow = ({ p, compact, onOpen, onCall, onRoute, routed, starred }: { p: Prospect; compact?: boolean; onOpen: (id: number) => void; onCall: (id: number) => void; onRoute: (id: number) => void; routed: boolean; starred?: boolean }) => {
   const d = decorate(p);
   return (
     <div className="prow card">
       <button className="btn prow-main" onClick={() => onOpen(p.id)}>
-        <span className="prow-name" style={compact ? { fontSize: 17 } : undefined}>{p.company}</span>
+        <span className="prow-name" style={compact ? { fontSize: 17 } : undefined}>{starred && <span style={{ color: '#C9A45C' }}>★ </span>}{p.company}</span>
         <span className="prow-sub">{compact ? `${d.contact} · ${p.type} · ${p.city}` : `${d.contact} · ${p.city}`}</span>
         {compact
           ? <div className="row" style={{ gap: 8 }}><Chip bg={d.chipBg} fg={d.chipFg} label={d.statusLabel} /><span style={{ font: "500 12px/1 'Barlow',sans-serif", color: '#8A8276' }}>{d.lastLabel}</span></div>
@@ -60,12 +63,6 @@ const ProspectRow = ({ p, compact, onOpen, onCall, onRoute, routed }: { p: Prosp
   );
 };
 
-const TranscriptLine = ({ l, live }: { l: Line; live?: boolean }) => (
-  <div className="tline" style={live ? { gap: 3 } : undefined}>
-    <span className="who" style={{ color: whoColor(l.who, !!live), letterSpacing: live ? '.1em' : undefined }}>{l.who}</span>
-    <span style={{ font: live ? "500 19px/1.4 'Barlow',sans-serif" : "400 15px/1.4 'Barlow',sans-serif" }}>{l.text}</span>
-  </div>
-);
 
 export default function App() {
   const [prospects, setProspects] = useState<Prospect[]>(loadProspects);
@@ -74,11 +71,9 @@ export default function App() {
   const [activeId, setActiveId] = useState<number | null>(draft0 ? draft0.activeId : null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [openCall, setOpenCall] = useState<number | null>(null);
   const [call, setCall] = useState<LiveCall | null>(draft0 ? { ...draft0.call, secs: draft0.wrap ? draft0.call.secs : Math.round((draft0.savedAt - draft0.call.start) / 1000) } : null);
-  const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
-  const [wrap, setWrap] = useState<Wrap | null>(draft0 ? draft0.wrap || { outcome: null, follow: null, note: '', summary: summarize(draft0.call.lines) } : null);
+  const [wrap, setWrap] = useState<Wrap | null>(draft0 ? draft0.wrap || { outcome: null, follow: null, note: '', summary: '' } : null);
   const [dictating, setDictating] = useState(false);
   const [driveIdx, setDriveIdx] = useState(0);
   const [voice, setVoice] = useState(false);
@@ -88,6 +83,8 @@ export default function App() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [briefAt, setBriefAt] = useState<string | null>(readBriefAt);
   const [route, setRoute] = useState<number[]>(readRoute);
+  const [myList, setMyList] = useState<number[]>(readMyList);
+  const [upd, setUpd] = useState<Upd | null>(null);
   const [backToYard, setBackToYard] = useState(readRouteHome);
   const [candCity, setCandCity] = useState('');
   const [candMin, setCandMin] = useState(70);
@@ -105,7 +102,6 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
 
   const timer = useRef<number | undefined>(undefined);
-  const demo = useRef<number | undefined>(undefined);
   const wasDrive = useRef(!!draft0?.wasDrive);
   const driveQueue = useRef<Prospect[] | null>(null);
   const driveIdxRef = useRef(0);
@@ -162,8 +158,10 @@ export default function App() {
         const list = await loadTeamList();
         await adopt(list, m);
         const st = await loadUserState();
+        if (live && st && !Array.isArray(st.route) && Array.isArray(st.myList)) { setMyList(st.myList); try { localStorage.setItem(MYLIST_KEY, JSON.stringify(st.myList)); } catch { /* ignore */ } }
         if (live && st && Array.isArray(st.route)) {
           setRoute(st.route); setBackToYard(st.backToYard !== false);
+          if (Array.isArray(st.myList)) { setMyList(st.myList); try { localStorage.setItem(MYLIST_KEY, JSON.stringify(st.myList)); } catch { /* ignore */ } }
           try { localStorage.setItem(ROUTE_KEY, JSON.stringify(st.route)); localStorage.setItem(ROUTE_HOME_KEY, st.backToYard === false ? '0' : '1'); } catch { /* ignore */ }
         }
       } catch { /* offline: keep the on-phone copy until the next sync */ }
@@ -176,12 +174,12 @@ export default function App() {
     const onShow = () => { if (document.visibilityState === 'visible') sync(); };
     document.addEventListener('visibilitychange', onShow);
     window.addEventListener('online', onShow);
-    const every = window.setInterval(onShow, 60000);
+    const every = window.setInterval(onShow, 20000);
     return () => { document.removeEventListener('visibilitychange', onShow); window.removeEventListener('online', onShow); clearInterval(every); };
   }, []);
-  useEffect(() => () => { clearInterval(timer.current); clearInterval(demo.current); stopRec(); }, []);
+  useEffect(() => () => { clearInterval(timer.current); stopRec(); }, []);
 
-  // Keep the call in progress (transcript, outcome, notes) on the phone until it is saved.
+  // Keep the call in progress (outcome, follow-up, notes) on the phone until it is saved.
   useEffect(() => {
     if ((screen !== 'call' && screen !== 'wrap') || !call || activeId == null) return;
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ activeId, call, wrap: screen === 'wrap' ? wrap : null, prev, wasDrive: wasDrive.current, savedAt: Date.now() })); } catch { /* ignore */ }
@@ -197,6 +195,12 @@ export default function App() {
     document.addEventListener('visibilitychange', check);
     return () => document.removeEventListener('visibilitychange', check);
   }, []);
+
+  // Live updates: refresh as soon as anyone on the team changes a prospect or logs a call.
+  useEffect(() => {
+    if (!cloudEnabled || !me) return;
+    return watchTeamChanges(() => { if (document.visibilityState === 'visible') sync(); });
+  }, [me]);
 
   // Owner's Team list: (re)load whenever the account sheet is open and the list was reset.
   useEffect(() => {
@@ -217,11 +221,20 @@ export default function App() {
   const cur = prospects.find(p => p.id === activeId);
 
   // ---- drive route ----
+  // Route and the private priority list are per person: kept on the phone and in the person's own user_state row.
+  const pushUserState = (st: { route: number[]; backToYard: boolean; myList: number[] }) => { if (cloudEnabled && meRef.current) saveUserState(meRef.current.email, st); };
   const saveRoute = (ids: number[], home = backToYard) => {
     setRoute(ids);
     try { localStorage.setItem(ROUTE_KEY, JSON.stringify(ids)); } catch { /* ignore */ }
-    if (cloudEnabled && meRef.current) saveUserState(meRef.current.email, { route: ids, backToYard: home });
+    pushUserState({ route: ids, backToYard: home, myList });
   };
+  const saveMyList = (ids: number[]) => {
+    setMyList(ids);
+    try { localStorage.setItem(MYLIST_KEY, JSON.stringify(ids)); } catch { /* ignore */ }
+    pushUserState({ route, backToYard, myList: ids });
+  };
+  const toggleMine = (id: number) => saveMyList(myList.includes(id) ? myList.filter(x => x !== id) : [id, ...myList]);
+  const myStops = myList.map(id => prospects.find(p => p.id === id)).filter((p): p is Prospect => !!p);
   const toggleRoute = (id: number) => saveRoute(route.includes(id) ? route.filter(x => x !== id) : [...route, id]);
   const routeStops = route.map(id => prospects.find(p => p.id === id)).filter((p): p is Prospect => !!p);
 
@@ -231,41 +244,38 @@ export default function App() {
   const T0 = startOfToday();
   const callsToday = prospects.reduce((n, p) => n + p.calls.filter(c => c.at >= T0 && (isOwner || c.by === me?.name)).length, 0);
 
-  const open = (id: number) => { setActiveId(id); setPrev(screen); setScreen('detail'); setOpenCall(null); };
+  const open = (id: number) => { setActiveId(id); setPrev(screen); setScreen('detail'); setUpd(null); };
   const leaveDetail = () => setScreen(prev === 'detail' ? 'today' : prev);
 
   // ---- calls ----
   function placeCall(id: number) {
     const p = prospects.find(x => x.id === id); if (!p) return;
     if (!p.phone) { open(id); return; }
-    stopRec(); clearInterval(demo.current);
+    stopRec();
     const start = Date.now();
-    setActiveId(id); setScreen('call'); setCall({ start, secs: 0, lines: [] }); setListening(false); setInterim(''); setVoice(false);
+    setActiveId(id); setScreen('call'); setCall({ start, secs: 0, lines: [] }); setInterim(''); setVoice(false);
+    // Tell the rest of the team right away that this prospect is being called.
+    if (cloudEnabled && me) persist(prospects.map(x => (x.id === id ? { ...x, calling: { by: me.name, at: start } } : x)));
     clearInterval(timer.current);
     timer.current = window.setInterval(() => setCall(c => (c ? { ...c, secs: Math.round((Date.now() - c.start) / 1000) } : c)), 1000);
-    if (isMobile) {
-      const a = document.createElement('a'); a.href = 'tel:' + p.phone; a.click();
-    } else if (DEMO_TRANSCRIPT) {
-      let i = 0;
-      setListening(true);
-      demo.current = window.setInterval(() => {
-        if (i >= DEMO.length) { clearInterval(demo.current); setListening(false); return; }
-        const l = DEMO[i++];
-        setCall(c => (c ? { ...c, lines: [...c.lines, l] } : c));
-      }, 1800);
-    }
+    if (isMobile) { const a = document.createElement('a'); a.href = 'tel:' + p.phone; a.click(); }
   }
-  const callFrom = (id: number) => { wasDrive.current = false; setPrev(screen); placeCall(id); };
 
-  const toggleListen = () => {
-    if (listening) { stopRec(); clearInterval(demo.current); setListening(false); setInterim(''); return; }
-    setListening(startRec(t => setCall(c => (c ? { ...c, lines: [...c.lines, { who: 'Call', text: t }] } : c)), setInterim));
-  };
+  /** Warns before calling a prospect someone else is calling now or called in the last week. */
+  function okToCall(id: number) {
+    const p = prospects.find(x => x.id === id); if (!p || !cloudEnabled) return true;
+    const c = callingNow(p);
+    if (c && c.by !== me?.name) return window.confirm(`${c.by} started calling ${p.company} at ${new Date(c.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} and hasn't saved the call yet.\n\nCall anyway?`);
+    const last = p.calls[0];
+    if (last && recentlyCalled(p) && last.by && last.by !== me?.name) return window.confirm(`${last.by} already called ${p.company} ${fmtWhen(last.at)} (${(OUTCOME[last.outcome] || OUTCOME.none).label}).\n\nCall anyway?`);
+    return true;
+  }
+  const callFrom = (id: number) => { if (!okToCall(id)) return; wasDrive.current = false; setPrev(screen); placeCall(id); };
 
   const endCall = () => {
-    clearInterval(timer.current); clearInterval(demo.current); stopRec();
-    setScreen('wrap'); setListening(false); setInterim('');
-    setWrap({ outcome: null, follow: null, note: '', summary: summarize(call ? call.lines : []) });
+    clearInterval(timer.current); stopRec();
+    setScreen('wrap'); setInterim('');
+    setWrap({ outcome: null, follow: null, note: '', summary: '' });
   };
 
   const toggleDictate = () => {
@@ -277,15 +287,15 @@ export default function App() {
     if (!wrap || !call) return;
     stopRec();
     const oc = wrap.outcome || 'none';
-    const summary = [wrap.note, call.lines.length ? wrap.summary : ''].filter(Boolean).join(' — ') || 'Call logged, no notes.';
+    const summary = wrap.note.trim() || 'Call logged, no notes.';
     const next = wrap.follow == null ? undefined : wrap.follow === -1 ? null : rel(wrap.follow);
     persist(prospects.map(p => p.id !== activeId ? p : {
-      ...p, pinned: null,
+      ...p, pinned: null, calling: null,
       // The owner calling it back clears the flag; a team member can raise it.
       attention: isOwner ? null : wrap.attention ? { by: me?.name || 'Team', at: Date.now(), note: (wrap.attentionNote || '').trim() } : p.attention ?? null,
       status: OUTCOME[oc].status || ((wrap.follow ?? 0) > 0 ? 'follow' : p.status),
       next: next === undefined ? (p.next && p.next <= today ? null : p.next) : next,
-      calls: [{ id: call.start * 1000 + Math.floor(Math.random() * 1000), at: call.start, secs: call.secs, outcome: oc, summary, lines: call.lines, by: me?.name, ...(wrap.attention && !isOwner ? { attention: true } : {}) }, ...p.calls],
+      calls: [{ id: call.start * 1000 + Math.floor(Math.random() * 1000), at: call.start, secs: call.secs, outcome: oc, summary, lines: [], by: me?.name, ...(wrap.attention && !isOwner ? { attention: true } : {}) }, ...p.calls],
     }));
     const fromDrive = prev === 'drive' || wasDrive.current;
     setWrap(null); setCall(null); setDictating(false);
@@ -303,7 +313,7 @@ export default function App() {
   const drvP = drvRaw ? prospects.find(p => p.id === drvRaw.id) || drvRaw : null;
 
   const startDrive = () => { driveQueue.current = queueList(prospects, cloudEnabled && isOwner); setScreen('drive'); setDriveIdx(0); };
-  const driveCall = (p: Prospect | undefined) => { if (!p) return; wasDrive.current = true; setPrev('drive'); placeCall(p.id); };
+  const driveCall = (p: Prospect | undefined) => { if (!p || !okToCall(p.id)) return; wasDrive.current = true; setPrev('drive'); placeCall(p.id); };
   const driveNext = () => setDriveIdx(i => Math.min(i + 1, dq.length));
   const drivePrev = () => setDriveIdx(i => Math.max(i - 1, 0));
   const exitDrive = () => { stopRec(); setScreen('today'); setVoice(false); };
@@ -376,9 +386,9 @@ export default function App() {
   const briefLabel = briefAt ? 'Last updated ' + fmtWhen(+briefAt) : 'Not updated yet';
 
   const q = search.toLowerCase();
-  const inF = (p: Prospect, k: Filter) => k === 'all' || (k === 'top' ? !!p.top : k === 'follow' ? ['follow', 'interested'].includes(p.status) : p.status === k);
+  const inF = (p: Prospect, k: Filter) => k === 'all' || (k === 'mine' ? myList.includes(p.id) : (k === 'top' ? !!p.top : k === 'follow' ? ['follow', 'interested'].includes(p.status) : p.status === k));
   const filtered = prospects.filter(p => inF(p, filter) && (!q || [p.company, p.contact, p.city, p.type, p.lead, p.notes, p.address].join(' ').toLowerCase().includes(q)));
-  const filterDefs: [Filter, string][] = [['all', 'All'], ['top', 'Top priority'], ['new', 'New'], ['follow', 'Follow-up'], ['customer', 'Customers']];
+  const filterDefs: [Filter, string][] = [['all', 'All'], ...(isOwner ? [['mine', '★ My list']] as [Filter, string][] : []), ['top', 'Top priority'], ['new', 'New'], ['follow', 'Follow-up'], ['customer', 'Customers']];
 
   const log = prospects.flatMap(p => p.calls.map(c => ({ ...c, pid: p.id, company: p.company }))).sort((a, b) => b.at - a.at);
 
@@ -410,6 +420,15 @@ export default function App() {
               <button className="btn call-dot" aria-label={`Call ${p.company}`} onClick={() => callFrom(p.id)} style={{ width: 54, height: 54 }}>CALL</button>
             </div>
           ))}
+        </div>
+      )}
+      {isOwner && myStops.length > 0 && (
+        <div className="col" style={{ gap: 10 }}>
+          <div className="between" style={{ alignItems: 'baseline' }}>
+            <h2 className="h-section" style={{ color: '#C9A45C' }}>★ My priority list · {myStops.length}</h2>
+            <button className="btn link-btn" onClick={() => { setFilter('mine'); setScreen('prospects'); }}>See all</button>
+          </div>
+          {myStops.slice(0, 5).map(p => <ProspectRow key={p.id} p={p} onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred />)}
         </div>
       )}
       {isOwner && autoBrief && (
@@ -450,7 +469,7 @@ export default function App() {
         <button className="btn link-btn" onClick={() => setScreen('prospects')}>All prospects</button>
       </div>
       <div className="col" style={{ gap: 10 }}>
-        {queue.slice(0, 5).map(p => <ProspectRow key={p.id} p={p} onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} />)}
+        {queue.slice(0, 5).map(p => <ProspectRow key={p.id} p={p} onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred={isOwner && myList.includes(p.id)} />)}
       </div>
     </div>
   );
@@ -470,12 +489,72 @@ export default function App() {
         ))}
       </div>
       <div className="col" style={{ gap: 10 }}>
-        {filtered.slice().sort((a, b) => (b.pinned || 0) - (a.pinned || 0)).map(p => <ProspectRow key={p.id} p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} />)}
+        {filtered.slice().sort((a, b) => (b.pinned || 0) - (a.pinned || 0)).map(p => <ProspectRow key={p.id} p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred={isOwner && myList.includes(p.id)} />)}
         {!filtered.length && <p className="muted" style={{ margin: '24px 0', textAlign: 'center', font: "500 15px 'Barlow',sans-serif" }}>No prospects match.</p>}
       </div>
       <button className="btn fab" onClick={openAdd}>+ Add prospect</button>
     </div>
   );
+
+  // Change status / follow-up / notes without making a call.
+  const renderUpdate = (p: Prospect) => {
+    if (!upd || activeId !== p.id) {
+      return (
+        <button className="btn btn-outline" onClick={() => setUpd({ status: p.status, next: p.next, note: '', attention: false, attentionNote: '' })} style={{ height: 52, borderRadius: 14, borderColor: '#3A352E', color: '#F2EEE6' }}>
+          Update status, follow-up or notes
+        </button>
+      );
+    }
+    const u = upd;
+    const set = (patch: Partial<Upd>) => setUpd(x => x && { ...x, ...patch });
+    const quick: [number, string][] = [[1, 'Tomorrow'], [3, 'In 3 days'], [7, 'Next week'], [30, '1 month']];
+    const statuses = (Object.keys(STATUS) as StatusKey[]);
+    const save = () => {
+      const stamp = `[${new Date().toLocaleDateString([], { month: 'short', day: 'numeric' })}${me ? ' · ' + me.name : ''}] `;
+      persist(prospects.map(x => x.id !== p.id ? x : {
+        ...x, status: u.status, next: u.next,
+        notes: u.note.trim() ? [x.notes, stamp + u.note.trim()].filter(Boolean).join('\n') : x.notes,
+        attention: u.attention ? { by: me?.name || 'Team', at: Date.now(), note: u.attentionNote.trim() } : x.attention ?? null,
+      }));
+      setUpd(null);
+    };
+    return (
+      <div className="card col" style={{ borderRadius: 16, padding: 16, gap: 12, borderColor: '#C9A45C' }}>
+        <div className="between">
+          <span style={{ font: "800 20px/1 'Barlow Condensed',sans-serif", textTransform: 'uppercase', letterSpacing: '.04em' }}>Update without calling</span>
+          <button className="btn sheet-close" onClick={() => setUpd(null)}>Cancel</button>
+        </div>
+        <span className="label">Status</span>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          {statuses.map(k => <button key={k} className="btn toggle opt" onClick={() => set({ status: k })} style={{ background: selBg(u.status === k), color: selFg(u.status === k) }}>{STATUS[k].label}</button>)}
+        </div>
+        <span className="label">Follow up</span>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          {quick.map(([d, l]) => <button key={d} className="btn toggle opt" onClick={() => set({ next: rel(d), status: u.status === 'new' ? 'follow' : u.status })} style={{ background: selBg(u.next === rel(d)), color: selFg(u.next === rel(d)) }}>{l}</button>)}
+          <button className="btn toggle opt" onClick={() => set({ next: null })} style={{ background: selBg(!u.next), color: selFg(!u.next) }}>None</button>
+        </div>
+        <label className="field">Or pick a date
+          <input type="date" value={u.next || ''} onChange={e => set({ next: e.target.value || null })} style={{ colorScheme: 'dark' }} />
+        </label>
+        {cloudEnabled && !isOwner && (
+          <>
+            <button className="btn toggle" onClick={() => set({ attention: !u.attention })} style={{ alignSelf: 'flex-start', height: 46, padding: '0 16px', borderRadius: 23, fontSize: 15, fontWeight: 700, background: u.attention ? '#E07B24' : '#1A1815', color: u.attention ? '#0E0D0B' : '#E07B24', borderColor: '#E07B24' }}>
+              {u.attention ? '✓ ' : ''}Attention {OWNER_NAME}
+            </button>
+            {u.attention && (
+              <label className="field" style={{ color: '#E07B24' }}>Note for {OWNER_NAME}
+                <textarea className="textarea" value={u.attentionNote} onChange={e => set({ attentionNote: e.target.value })} style={{ minHeight: 70, font: "500 16px/1.4 'Barlow',sans-serif", textTransform: 'none', letterSpacing: 0, borderColor: '#E07B24' }} />
+              </label>
+            )}
+          </>
+        )}
+        <label className="field">Add a note
+          <textarea className="textarea" value={u.note} onChange={e => set({ note: e.target.value })} placeholder="Added to this prospect's notes with today's date" style={{ minHeight: 70, font: "500 16px/1.4 'Barlow',sans-serif", textTransform: 'none', letterSpacing: 0 }} />
+        </label>
+        <button className="btn btn-cta btn-gold" onClick={save}>Save update</button>
+      </div>
+    );
+  };
 
   const renderDetail = () => {
     if (!cur) return null;
@@ -500,8 +579,8 @@ export default function App() {
           {cur.top && <span style={{ font: "700 13px/1.3 'Barlow',sans-serif", color: '#C9A45C', letterSpacing: '.04em', textTransform: 'uppercase' }}>Top priority · {d.sizeLabel}</span>}
         </div>
         {cur.lead && <div className="info-card card"><span className="t" style={{ color: '#C9A45C' }}>Why call</span><span className="b">{cur.lead}</span></div>}
-        {cur.notes && <div className="info-card card"><span className="t muted">Notes</span><span className="b">{cur.notes}</span></div>}
-        <button className="btn btn-gold press" onClick={() => { wasDrive.current = false; placeCall(cur.id); }} style={{ height: 68, borderRadius: 18, font: "800 26px/1 'Barlow Condensed',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase' }}>{d.callLabel}</button>
+        {cur.notes && <div className="info-card card"><span className="t muted">Notes</span><span className="b" style={{ whiteSpace: 'pre-line' }}>{cur.notes}</span></div>}
+        <button className="btn btn-gold press" onClick={() => { if (!okToCall(cur.id)) return; wasDrive.current = false; placeCall(cur.id); }} style={{ height: 68, borderRadius: 18, font: "800 26px/1 'Barlow Condensed',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase' }}>{d.callLabel}</button>
         <div className="grid2">
           <a className="btn-outline" href={d.smsHref} style={{ height: 52, borderRadius: 14 }}>Text pricing link</a>
           <a className="btn-outline" href={d.mapHref} target="_blank" rel="noreferrer" style={{ height: 52, borderRadius: 14 }}>Directions</a>
@@ -509,6 +588,12 @@ export default function App() {
         <button className="btn btn-outline" onClick={() => toggleRoute(cur.id)} style={{ height: 52, borderRadius: 14, ...(route.includes(cur.id) ? { borderColor: '#3A352E', color: '#A39A8C' } : {}) }}>
           {route.includes(cur.id) ? `On the route (stop ${route.indexOf(cur.id) + 1}) · Remove` : 'Add to drive route'}
         </button>
+        {isOwner && (
+          <button className="btn btn-outline" onClick={() => toggleMine(cur.id)} style={{ height: 52, borderRadius: 14, ...(myList.includes(cur.id) ? { background: '#C9A45C', color: '#0E0D0B' } : {}) }}>
+            {myList.includes(cur.id) ? '★ On my priority list · Remove' : '☆ Add to my priority list'}
+          </button>
+        )}
+        {renderUpdate(cur)}
         <div className="col" style={{ gap: 6 }}>
           {cur.email && <a href={'mailto:' + cur.email} style={{ font: "600 15px/1.4 'Barlow',sans-serif", color: '#D9B872', wordBreak: 'break-all' }}>{cur.email}</a>}
           {cur.address && <span className="muted" style={{ font: "500 15px/1.4 'Barlow',sans-serif" }}>{cur.address}</span>}
@@ -529,9 +614,8 @@ export default function App() {
         </div>
         {!cur.calls.length && <p className="muted" style={{ font: "500 15px 'Barlow',sans-serif" }}>No calls yet.</p>}
         <div className="col" style={{ gap: 10 }}>
-          {cur.calls.map((c, i) => {
+          {cur.calls.map(c => {
             const o = OUTCOME[c.outcome] || OUTCOME.none;
-            const isOpen = openCall === i;
             return (
               <div key={c.at} className="history card">
                 <div className="between" style={{ gap: 8 }}>
@@ -539,16 +623,6 @@ export default function App() {
                   <Chip bg={o.bg} fg={o.fg} label={o.label} />
                 </div>
                 <p className="pretty" style={{ font: "500 16px/1.4 'Barlow',sans-serif" }}>{c.summary}</p>
-                {c.lines.length > 0 && (
-                  <button className="btn" onClick={() => setOpenCall(isOpen ? null : i)} style={{ alignSelf: 'flex-start', height: 36, display: 'flex', alignItems: 'center', font: "700 14px 'Barlow',sans-serif", color: '#D9B872' }}>
-                    {isOpen ? 'Hide transcript' : `View transcript (${c.lines.length})`}
-                  </button>
-                )}
-                {isOpen && (
-                  <div className="col" style={{ gap: 8, borderTop: '1px solid #2E2A24', paddingTop: 10 }}>
-                    {c.lines.map((l, j) => <TranscriptLine key={j} l={l} />)}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -671,7 +745,7 @@ export default function App() {
                 <span style={{ font: "700 17px/1.2 'Barlow',sans-serif" }}>{c.company}</span>
                 <span className="chip" style={{ flex: 'none', background: o.bg, color: o.fg }}>{o.label}</span>
               </div>
-              <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''} · {c.lines.length} transcript lines{c.attention ? <b style={{ color: '#E07B24' }}> · Attention {OWNER_NAME}</b> : null}</span>
+              <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''}{c.attention ? <b style={{ color: '#E07B24' }}> · Attention {OWNER_NAME}</b> : null}</span>
               <span className="pretty" style={{ font: "500 15px/1.4 'Barlow',sans-serif", color: '#CFC8BC' }}>{c.summary}</span>
             </button>
           );
@@ -750,38 +824,24 @@ export default function App() {
     );
   };
 
-  const renderCall = () => {
-    const c = call || { secs: 0, lines: [] };
-    return (
-      <div className="overlay call-screen">
-        <div className="between">
-          <span className="rec"><i />{listening ? 'On call · Transcribing' : 'On call'}</span>
-          <span className="timer">{fmtTime(c.secs)}</span>
-        </div>
-        <h1 style={{ margin: '18px 0 2px', font: "700 36px/1.05 'Barlow Condensed',sans-serif" }}>{cur?.company}</h1>
-        <span style={{ font: "500 17px 'Barlow',sans-serif", color: '#B8AE9F' }}>{cur && decorate(cur).contact} · {cur && (cur.phone ? fmtPhone(cur.phone) : 'No phone yet')}</span>
-        <div className="transcript">
-          {!c.lines.length && (
-            <p className="pretty" style={{ font: "500 16px/1.45 'Barlow',sans-serif", color: '#8A8276' }}>
-              {speechSupported ? 'Put the call on speaker and tap Transcribe. Lines appear here and are saved with the call.' : 'Live transcription is not supported in this browser. Use Chrome on Android.'}
-            </p>
-          )}
-          {c.lines.map((l, i) => <TranscriptLine key={i} l={l} live />)}
-          {listening && interim && <span style={{ font: "500 19px/1.4 'Barlow',sans-serif", color: '#8A8276' }}>{interim}</span>}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 12 }}>
-          <button className="btn" onClick={toggleListen} style={{ height: 72, borderRadius: 20, border: `2px solid ${listening ? '#C9A45C' : '#3D372F'}`, color: '#F5F2EC', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', font: "700 16px/1.15 'Barlow',sans-serif" }}>
-            {listening ? 'Pause transcript' : 'Transcribe'}
-          </button>
-          <button className="btn end-call" onClick={endCall}>End call</button>
-        </div>
+  const renderCall = () => (
+    <div className="overlay call-screen">
+      <div className="between">
+        <span className="rec"><i />On call</span>
+        <span className="timer">{fmtTime(call ? call.secs : 0)}</span>
       </div>
-    );
-  };
+      <h1 style={{ margin: '18px 0 2px', font: "700 36px/1.05 'Barlow Condensed',sans-serif" }}>{cur?.company}</h1>
+      <span style={{ font: "500 17px 'Barlow',sans-serif", color: '#B8AE9F' }}>{cur && decorate(cur).contact} · {cur && (cur.phone ? fmtPhone(cur.phone) : 'No phone yet')}</span>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', margin: '18px 0', borderTop: '1px solid #2E2921', paddingTop: 16 }}>
+        {cur?.lead && <p className="pretty" style={{ font: "500 17px/1.45 'Barlow',sans-serif", color: '#CFC8BC' }}>{cur.lead}</p>}
+        <p className="pretty" style={{ marginTop: 12, font: "500 15px/1.45 'Barlow',sans-serif", color: '#8A8276' }}>Tap End call when you hang up to log how it went.</p>
+      </div>
+      <button className="btn end-call" onClick={endCall}>End call</button>
+    </div>
+  );
 
   const renderWrap = () => {
     const w = wrap || { outcome: null, follow: null, note: '', summary: '' };
-    const lines = call ? call.lines.length : 0;
     const outcomes = (Object.keys(OUTCOME) as OutcomeKey[]).filter(k => k !== 'none');
     const follows: [number, string][] = [[1, 'Tomorrow'], [3, 'In 3 days'], [7, 'Next week'], [30, '1 month'], [-1, 'None']];
     return (
@@ -823,19 +883,14 @@ export default function App() {
               {dictating ? 'Stop dictating' : 'Dictate'}
             </button>
           </div>
-          <textarea className="textarea" value={w.note} onChange={e => { const v = e.target.value; setWrap(x => x && { ...x, note: v }); }} placeholder="Tap Dictate and talk — or type" style={{ minHeight: 96, font: "500 16px/1.4 'Barlow',sans-serif" }} />
-          <div className="history card">
-            <span className="label">Transcript summary</span>
-            <p className="pretty" style={{ font: "500 16px/1.4 'Barlow',sans-serif" }}>{w.summary}</p>
-            <span style={{ font: "500 13px 'Barlow',sans-serif", color: '#8A8276' }}>{lines} lines saved to call history</span>
-          </div>
+          <textarea className="textarea" value={w.note} onChange={e => { const v = e.target.value; setWrap(x => x && { ...x, note: v }); }} placeholder="What happened? Tap Dictate and talk, or type" style={{ minHeight: 96, font: "500 16px/1.4 'Barlow',sans-serif" }} />
           {cur && <a className="btn-outline" href={decorate(cur).smsHref} style={{ height: 52, borderRadius: 14 }}>{decorate(cur).textLabel}</a>}
         </div>
         <div className="wrap-foot">
           <button className="btn btn-gold" onClick={saveWrap} style={{ width: '100%', height: 64, borderRadius: 18, font: "800 24px/1 'Barlow Condensed',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase' }}>
             {wasDrive.current ? 'Save & next call' : 'Save call'}
           </button>
-          <button className="btn" onClick={() => { if (!window.confirm('Discard this call without saving it?')) return; stopRec(); clearDraft(); setWrap(null); setCall(null); setDictating(false); setScreen(activeId != null ? 'detail' : 'today'); }}
+          <button className="btn" onClick={() => { if (!window.confirm('Discard this call without saving it?')) return; stopRec(); clearDraft(); setWrap(null); setCall(null); setDictating(false); setScreen(activeId != null ? 'detail' : 'today'); if (cloudEnabled && activeId != null) persist(prospects.map(x => (x.id === activeId ? { ...x, calling: null } : x))); }}
             style={{ width: '100%', height: 36, marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "600 14px 'Barlow',sans-serif", color: '#8A8276' }}>Discard this call</button>
         </div>
       </div>
@@ -872,7 +927,7 @@ export default function App() {
         ) : (
           <div className="col" style={{ flex: 1, justifyContent: 'center', gap: 12 }}>
             <h1 style={{ font: "800 44px/1 'Barlow Condensed',sans-serif" }}>Queue done.</h1>
-            <span style={{ font: "500 19px/1.4 'Barlow',sans-serif", color: '#B8AE9F' }}>{callsToday} calls made today. Transcripts are in the call log.</span>
+            <span style={{ font: "500 19px/1.4 'Barlow',sans-serif", color: '#B8AE9F' }}>{callsToday} calls made today. They're all in the call log.</span>
           </div>
         )}
       </div>
@@ -1035,7 +1090,7 @@ export default function App() {
           </div>
           <div className="info-card card">
             <span className="t muted">Backup</span>
-            <span className="b">Download the prospect list and every call (with transcripts) as two spreadsheets you can keep.</span>
+            <span className="b">Download the prospect list and every call (with notes) as two spreadsheets you can keep.</span>
             <button className="btn link-btn" onClick={() => downloadBackup(prospects)} style={{ alignSelf: 'flex-start' }}>Download backup</button>
           </div>
           {me.role === 'owner' && <TeamManager team={team} me={me} onChanged={() => setTeam(null)} />}

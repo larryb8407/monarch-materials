@@ -226,13 +226,13 @@ export function downloadBackup(list: Prospect[]) {
     ...list.map(p => [p.company, p.contact, p.title, p.phone, p.email, p.type, p.city, p.address, p.top ? 'Most important' : '', p.score, p.lead, p.notes, p.status, p.next, p.interest, p.addedBy]),
   ]));
   setTimeout(() => download(`monarch-calls-${day}.csv`, csv([
-    ['date', 'company', 'by', 'outcome', 'minutes', 'summary', 'transcript'],
-    ...list.flatMap(p => p.calls.map(c => [new Date(c.at).toLocaleString(), p.company, c.by, c.outcome, (c.secs / 60).toFixed(1), c.summary, c.lines.map(l => `${l.who}: ${l.text}`).join('\n')])),
+    ['date', 'company', 'by', 'outcome', 'minutes', 'notes'],
+    ...list.flatMap(p => p.calls.map(c => [new Date(c.at).toLocaleString(), p.company, c.by, c.outcome, (c.secs / 60).toFixed(1), c.summary])),
   ])), 800);
 }
 
 // ---- per-person settings (drive route) ----
-export interface UserState { route?: number[]; backToYard?: boolean }
+export interface UserState { route?: number[]; backToYard?: boolean; myList?: number[] }
 export async function loadUserState(): Promise<UserState | null> {
   if (!sb) return null;
   const { data } = await sb.from('user_state').select('data').maybeSingle();
@@ -241,4 +241,17 @@ export async function loadUserState(): Promise<UserState | null> {
 /** Best effort: the route is also kept on the phone, so a failed save only loses it on other devices. */
 export function saveUserState(email: string, state: UserState) {
   sb?.from('user_state').upsert({ email: email.toLowerCase(), data: state, updated_at: new Date().toISOString() }).then(() => {}, () => {});
+}
+
+/** Calls `onChange` (debounced) whenever anyone on the team changes a prospect or logs a call. Needs the tables in the
+ * supabase_realtime publication (see setup.sql); without it this silently does nothing and the 20-second refresh covers it. */
+export function watchTeamChanges(onChange: () => void): () => void {
+  if (!sb) return () => {};
+  let t: number | undefined;
+  const fire = () => { clearTimeout(t); t = window.setTimeout(onChange, 400); };
+  const ch = sb.channel('monarch-team')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'prospects' }, fire)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, fire)
+    .subscribe();
+  return () => { clearTimeout(t); sb.removeChannel(ch); };
 }
