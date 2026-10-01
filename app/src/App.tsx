@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DEMO, DEMO_TRANSCRIPT, DRIVE_AUTO_NEXT, OUTCOME, STORAGE_KEY,
-  ROUTE_HOME_KEY, ROUTE_KEY, decorate, fetchAutoBrief, fmtPhone, placeOf, routeLegs, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, summarize, toProspect,
+  ROUTE_HOME_KEY, ROUTE_KEY, OWNER_NAME, decorate, fetchAutoBrief, fmtPhone, placeOf, routeLegs, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, summarize, toProspect,
   type BriefItem, type Line, type StatusKey, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
@@ -12,7 +12,7 @@ import logoUrl from './monarch-logo.webp';
 type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'route' | 'call' | 'wrap' | 'drive';
 type Filter = 'all' | 'top' | 'new' | 'follow' | 'customer';
 interface LiveCall { start: number; secs: number; lines: Line[] }
-interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string }
+interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string; attention?: boolean; attentionNote?: string }
 interface Brief { step: 'input' | 'review'; text: string; busy: boolean; error: string; auto?: string; added?: BriefItem[]; updated?: (BriefItem & { id: number })[] }
 interface AddForm { company?: string; contact?: string; phone?: string; city?: string; type: string; interest: string }
 
@@ -225,7 +225,8 @@ export default function App() {
   const toggleRoute = (id: number) => saveRoute(route.includes(id) ? route.filter(x => x !== id) : [...route, id]);
   const routeStops = route.map(id => prospects.find(p => p.id === id)).filter((p): p is Prospect => !!p);
 
-  const queue = queueList(prospects);
+  const queue = queueList(prospects, cloudEnabled && isOwner);
+  const attention = cloudEnabled && isOwner ? prospects.filter(p => p.attention).sort((a, b) => b.attention!.at - a.attention!.at) : [];
   const today = rel(0);
   const T0 = startOfToday();
   const callsToday = prospects.reduce((n, p) => n + p.calls.filter(c => c.at >= T0 && (isOwner || c.by === me?.name)).length, 0);
@@ -280,9 +281,11 @@ export default function App() {
     const next = wrap.follow == null ? undefined : wrap.follow === -1 ? null : rel(wrap.follow);
     persist(prospects.map(p => p.id !== activeId ? p : {
       ...p, pinned: null,
+      // The owner calling it back clears the flag; a team member can raise it.
+      attention: isOwner ? null : wrap.attention ? { by: me?.name || 'Team', at: Date.now(), note: (wrap.attentionNote || '').trim() } : p.attention ?? null,
       status: OUTCOME[oc].status || ((wrap.follow ?? 0) > 0 ? 'follow' : p.status),
       next: next === undefined ? (p.next && p.next <= today ? null : p.next) : next,
-      calls: [{ id: call.start * 1000 + Math.floor(Math.random() * 1000), at: call.start, secs: call.secs, outcome: oc, summary, lines: call.lines, by: me?.name }, ...p.calls],
+      calls: [{ id: call.start * 1000 + Math.floor(Math.random() * 1000), at: call.start, secs: call.secs, outcome: oc, summary, lines: call.lines, by: me?.name, ...(wrap.attention && !isOwner ? { attention: true } : {}) }, ...p.calls],
     }));
     const fromDrive = prev === 'drive' || wasDrive.current;
     setWrap(null); setCall(null); setDictating(false);
@@ -299,7 +302,7 @@ export default function App() {
   const drvRaw = dq[driveIdx];
   const drvP = drvRaw ? prospects.find(p => p.id === drvRaw.id) || drvRaw : null;
 
-  const startDrive = () => { driveQueue.current = queueList(prospects); setScreen('drive'); setDriveIdx(0); };
+  const startDrive = () => { driveQueue.current = queueList(prospects, cloudEnabled && isOwner); setScreen('drive'); setDriveIdx(0); };
   const driveCall = (p: Prospect | undefined) => { if (!p) return; wasDrive.current = true; setPrev('drive'); placeCall(p.id); };
   const driveNext = () => setDriveIdx(i => Math.min(i + 1, dq.length));
   const drivePrev = () => setDriveIdx(i => Math.max(i - 1, 0));
@@ -389,6 +392,22 @@ export default function App() {
         <div className="stat card"><b>{callsToday}</b><span>{cloudEnabled && isOwner ? 'Team calls today' : 'Calls made today'}</span></div>
         <div className="stat card"><b style={{ color: '#D9B872' }}>{prospects.filter(p => p.next && p.next <= today).length}</b><span>Follow-ups due</span></div>
       </div>
+      {attention.length > 0 && (
+        <div className="card col" style={{ borderRadius: 16, padding: '14px 14px 6px 16px', gap: 10, border: '1.5px solid #E07B24', background: '#2A1A10' }}>
+          <span style={{ font: "800 20px/1 'Barlow Condensed',sans-serif", letterSpacing: '.04em', textTransform: 'uppercase', color: '#E07B24' }}>Attention {OWNER_NAME} · {attention.length}</span>
+          {attention.map(p => (
+            <div key={p.id} className="row" style={{ gap: 12, paddingBottom: 8, borderTop: '1px solid #3A2A1E', paddingTop: 10 }}>
+              <button className="btn col" onClick={() => open(p.id)} style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                <span className="prow-name" style={{ fontSize: 17 }}>{p.company}</span>
+                <span style={{ font: "600 13px/1.3 'Barlow',sans-serif", color: '#E8A86A' }}>{p.attention!.by} · {fmtWhen(p.attention!.at)}</span>
+                {p.attention!.note && <span className="pretty" style={{ font: "600 15px/1.35 'Barlow',sans-serif", color: '#F2EEE6' }}>“{p.attention!.note}”</span>}
+                {p.calls[0] && <span className="muted pretty" style={{ font: "500 14px/1.35 'Barlow',sans-serif" }}>{p.calls[0].summary}</span>}
+              </button>
+              <button className="btn call-dot" aria-label={`Call ${p.company}`} onClick={() => callFrom(p.id)} style={{ width: 54, height: 54 }}>CALL</button>
+            </div>
+          ))}
+        </div>
+      )}
       {isOwner && autoBrief && (
         <button className="btn brief-card" onClick={reviewAutoBrief} style={{ background: '#2A2316', border: '1.5px solid #C9A45C' }}>
           <div className="col" style={{ gap: 4, minWidth: 0 }}>
@@ -490,6 +509,15 @@ export default function App() {
           {cur.email && <a href={'mailto:' + cur.email} style={{ font: "600 15px/1.4 'Barlow',sans-serif", color: '#D9B872', wordBreak: 'break-all' }}>{cur.email}</a>}
           {cur.address && <span className="muted" style={{ font: "500 15px/1.4 'Barlow',sans-serif" }}>{cur.address}</span>}
         </div>
+        {cur.attention && (
+          <div className="follow-banner" style={{ background: '#2A1A10', color: '#E8A86A', border: '1.5px solid #E07B24', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span className="col" style={{ gap: 4 }}>
+              <span>{cur.attention.by} asked {isOwner ? 'you' : OWNER_NAME} to call back · {fmtWhen(cur.attention.at)}</span>
+              {cur.attention.note && <span style={{ color: '#F2EEE6', fontWeight: 500 }}>“{cur.attention.note}”</span>}
+            </span>
+            {isOwner && <button className="btn" onClick={() => persist(prospects.map(p => (p.id === cur.id ? { ...p, attention: null } : p)))} style={{ flex: 'none', font: "700 14px 'Barlow',sans-serif", color: '#E07B24', padding: '6px 0' }}>Mark handled</button>}
+          </div>
+        )}
         {cur.next && <div className="follow-banner">Follow up {new Date(cur.next + 'T12:00').toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</div>}
         <div className="between" style={{ marginTop: 6 }}>
           <h2 className="h-section">Call history</h2>
@@ -503,7 +531,7 @@ export default function App() {
             return (
               <div key={c.at} className="history card">
                 <div className="between" style={{ gap: 8 }}>
-                  <span className="muted" style={{ font: "600 14px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''}</span>
+                  <span className="muted" style={{ font: "600 14px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''}{c.attention ? <b style={{ color: '#E07B24' }}> · Attention {OWNER_NAME}</b> : null}</span>
                   <Chip bg={o.bg} fg={o.fg} label={o.label} />
                 </div>
                 <p className="pretty" style={{ font: "500 16px/1.4 'Barlow',sans-serif" }}>{c.summary}</p>
@@ -583,7 +611,7 @@ export default function App() {
                 <span style={{ font: "700 17px/1.2 'Barlow',sans-serif" }}>{c.company}</span>
                 <span className="chip" style={{ flex: 'none', background: o.bg, color: o.fg }}>{o.label}</span>
               </div>
-              <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''} · {c.lines.length} transcript lines</span>
+              <span className="muted" style={{ font: "500 13px 'Barlow',sans-serif" }}>{fmtWhen(c.at)} · {fmtTime(c.secs)}{c.by ? ` · ${c.by}` : ''} · {c.lines.length} transcript lines{c.attention ? <b style={{ color: '#E07B24' }}> · Attention {OWNER_NAME}</b> : null}</span>
               <span className="pretty" style={{ font: "500 15px/1.4 'Barlow',sans-serif", color: '#CFC8BC' }}>{c.summary}</span>
             </button>
           );
@@ -715,7 +743,20 @@ export default function App() {
             {follows.map(([d, label]) => (
               <button key={d} className="btn toggle" onClick={() => setWrap(x => x && { ...x, follow: d })} style={{ height: 46, padding: '0 16px', borderRadius: 23, fontSize: 15, background: selBg(w.follow === d), color: selFg(w.follow === d) }}>{label}</button>
             ))}
+            {cloudEnabled && !isOwner && (
+              <button className="btn toggle" aria-pressed={!!w.attention} onClick={() => setWrap(x => x && { ...x, attention: !x.attention })}
+                style={{ height: 46, padding: '0 16px', borderRadius: 23, fontSize: 15, fontWeight: 700, background: w.attention ? '#E07B24' : '#1A1815', color: w.attention ? '#0E0D0B' : '#E07B24', borderColor: '#E07B24' }}>
+                {w.attention ? '✓ ' : ''}Attention {OWNER_NAME}
+              </button>
+            )}
           </div>
+          {w.attention && (
+            <label className="field" style={{ color: '#E07B24' }}>Note for {OWNER_NAME}
+              <textarea className="textarea" value={w.attentionNote || ''} onChange={e => { const v = e.target.value; setWrap(x => x && { ...x, attentionNote: v }); }}
+                placeholder={`Why should ${OWNER_NAME} call back? Who to ask for, what they need, best time…`}
+                style={{ minHeight: 80, font: "500 16px/1.4 'Barlow',sans-serif", textTransform: 'none', letterSpacing: 0, borderColor: '#E07B24' }} />
+            </label>
+          )}
           <div className="between">
             <span className="label">Notes</span>
             <button className="btn" onClick={toggleDictate} style={{ height: 40, padding: '0 14px', borderRadius: 20, background: dictating ? '#C9A45C' : '#2E2A24', color: dictating ? '#0E0D0B' : '#F2EEE6', display: 'flex', alignItems: 'center', font: "700 14px 'Barlow',sans-serif" }}>
@@ -987,7 +1028,7 @@ export default function App() {
         <nav className="tabs">
           {tabs.map(([k, label]) => (
             <button key={k} className="btn tab" onClick={() => (k === 'drive' ? startDrive() : setScreen(k))} style={{ color: tabKey === k ? '#C9A45C' : '#8A8276' }}>
-              <i style={{ background: tabKey === k ? '#C9A45C' : 'transparent' }} />{label}{k === 'route' && routeStops.length > 0 && <b className="tab-count">{routeStops.length}</b>}
+              <i style={{ background: tabKey === k ? '#C9A45C' : 'transparent' }} />{label}{k === 'route' && routeStops.length > 0 && <b className="tab-count">{routeStops.length}</b>}{k === 'today' && attention.length > 0 && <b className="tab-count" style={{ background: '#E07B24' }}>{attention.length}</b>}
             </button>
           ))}
         </nav>

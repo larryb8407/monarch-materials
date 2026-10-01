@@ -1,7 +1,7 @@
 export type Who = 'You' | 'Them' | 'Call';
 export interface Line { who: Who; text: string }
 export type OutcomeKey = 'interested' | 'callback' | 'notnow' | 'won' | 'none';
-export interface Call { id?: number; at: number; secs: number; outcome: OutcomeKey; summary: string; lines: Line[]; by?: string }
+export interface Call { id?: number; at: number; secs: number; outcome: OutcomeKey; summary: string; lines: Line[]; by?: string; attention?: boolean }
 export type StatusKey = 'new' | 'follow' | 'interested' | 'customer' | 'notnow';
 
 export interface Prospect {
@@ -27,6 +27,8 @@ export interface Prospect {
   addedAt?: number;
   /** Team member who added this prospect (team mode). */
   addedBy?: string;
+  /** A team member asked the owner to call this prospect back. Cleared when the owner calls or marks it handled. */
+  attention?: { by: string; at: number; note?: string } | null;
   calls: Call[];
 }
 
@@ -43,6 +45,9 @@ export const BRIEF_SEEN_KEY = 'monarch-brief-seen';
 export const DRIVE_AUTO_NEXT = true;
 /** On a desktop browser (no dialer), play a scripted conversation so the call screen can be tried out. */
 export const DEMO_TRANSCRIPT = true;
+
+/** Who the Attention button on the wrap-up screen asks to call back. */
+export const OWNER_NAME = 'Larry';
 
 export const PRICING_URL = 'https://monarch-materials.com/pricing/';
 
@@ -155,10 +160,10 @@ export const summarize = (lines: Line[]) => {
   return (key.length ? key : them.length ? them : lines).slice(0, 3).map(l => (/[.?!]$/.test(l.text) ? l.text : l.text + '.')).join(' ');
 };
 
-/** Call queue order: pinned top leads, then due follow-ups, then new, then open follow-ups; ties by top priority and score. */
-export const queueList = (prospects: Prospect[]) => {
+/** Call queue order: (for the owner) prospects flagged for their attention, pinned top leads, then due follow-ups, then new, then open follow-ups; ties by top priority and score. */
+export const queueList = (prospects: Prospect[], ownerView = false) => {
   const today = rel(0);
-  const rank = (p: Prospect) => (p.pinned ? -1 : p.next && p.next <= today ? 0 : p.status === 'new' ? 1 : p.status === 'interested' || p.status === 'follow' ? 2 : 9);
+  const rank = (p: Prospect) => (ownerView && p.attention ? -2 : p.pinned ? -1 : p.next && p.next <= today ? 0 : p.status === 'new' ? 1 : p.status === 'interested' || p.status === 'follow' ? 2 : 9);
   return prospects.filter(p => rank(p) < 9).sort((a, b) => rank(a) - rank(b) || (b.pinned || 0) - (a.pinned || 0) || (b.top ? 1 : 0) - (a.top ? 1 : 0) || (b.score || 0) - (a.score || 0));
 };
 
@@ -168,9 +173,9 @@ export const decorate = (p: Prospect) => {
   const due = !!p.next && p.next <= rel(0);
   const first = p.contact ? p.contact.split(' ')[0] : '';
   return {
-    statusLabel: p.pinned ? 'New top lead' : due ? 'Due today' : st.label,
-    chipBg: p.pinned ? '#D6362B' : due ? '#C9A45C' : st.bg,
-    chipFg: p.pinned ? '#fff' : due ? '#0E0D0B' : st.fg,
+    statusLabel: p.attention ? `Attention ${OWNER_NAME}` : p.pinned ? 'New top lead' : due ? 'Due today' : st.label,
+    chipBg: p.attention ? '#E07B24' : p.pinned ? '#D6362B' : due ? '#C9A45C' : st.bg,
+    chipFg: p.attention ? '#0E0D0B' : p.pinned ? '#fff' : due ? '#0E0D0B' : st.fg,
     lastLabel: last ? 'Last call ' + fmtWhen(last.at) : 'Never called',
     lastSummary: last ? last.summary : (p.lead || `${p.type} · interested in ${(p.interest || '').toLowerCase()}`),
     contact: p.contact || p.title || 'Main line',
