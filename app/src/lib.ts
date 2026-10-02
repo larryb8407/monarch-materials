@@ -29,6 +29,8 @@ export interface Prospect {
   addedBy?: string;
   /** A team member asked the owner to call this prospect back. Cleared when the owner calls or marks it handled. */
   attention?: { by: string; at: number; note?: string } | null;
+  /** On the owner's private priority list since this time: hidden from the team until it becomes a customer. */
+  reservedAt?: number | null;
   /** Someone on the team tapped CALL on this prospect and hasn't saved the call yet. */
   calling?: { by: string; at: number } | null;
   calls: Call[];
@@ -145,6 +147,8 @@ export const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
 const DAY_MS = 86400000;
 /** How long a CALL tap marks a prospect as "being called" if the call is never saved. */
 export const CALLING_TTL = 30 * 60000;
+/** On the owner's priority list (a customer is never on it). */
+export const isReserved = (p: Prospect) => !!p.reservedAt && p.status !== 'customer';
 export const callingNow = (p: Prospect) => (p.calling && Date.now() - p.calling.at < CALLING_TTL ? p.calling : null);
 /** Called by anyone in the last 7 days: off the queue until its follow-up date comes up. */
 export const recentlyCalled = (p: Prospect) => !!p.calls[0] && Date.now() - p.calls[0].at < 7 * DAY_MS;

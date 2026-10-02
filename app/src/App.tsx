@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
-  BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DRIVE_AUTO_NEXT, OUTCOME, STATUS, STORAGE_KEY, callingNow, recentlyCalled,
+  BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DRIVE_AUTO_NEXT, OUTCOME, STATUS, STORAGE_KEY, callingNow, isReserved, recentlyCalled,
   ROUTE_HOME_KEY, ROUTE_KEY, OWNER_NAME, decorate, fetchAutoBrief, fmtPhone, placeOf, routeLegs, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, toProspect,
   type BriefItem, type Line, type StatusKey, type OutcomeKey, type Prospect,
 } from './lib';
 import { speechSupported, startRec, stopRec } from './speech';
-import { addMember, loadUserState, saveUserState, watchTeamChanges, cloudEnabled, diffOps, downloadBackup, enqueue, flush, mergeLocalOnce, snapshotLocal, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
+import { addMember, reservedMatch, loadUserState, saveUserState, watchTeamChanges, cloudEnabled, diffOps, downloadBackup, enqueue, flush, mergeLocalOnce, snapshotLocal, getSession, loadMe, loadTeam, loadTeamList, onAuth, pendingCount, removeMember, signIn, signOut, type Member } from './cloud';
 import bundledProspects from './prospects.json';
 import logoUrl from './monarch-logo.webp';
 
@@ -80,10 +80,10 @@ export default function App() {
   const [logoFailed, setLogoFailed] = useState(false);
   const [add, setAdd] = useState<AddForm | null>(null);
   const [edit, setEdit] = useState<Prospect | null>(null);
+  const [addMsg, setAddMsg] = useState('');
   const [brief, setBrief] = useState<Brief | null>(null);
   const [briefAt, setBriefAt] = useState<string | null>(readBriefAt);
   const [route, setRoute] = useState<number[]>(readRoute);
-  const [myList, setMyList] = useState<number[]>(readMyList);
   const [upd, setUpd] = useState<Upd | null>(null);
   const [backToYard, setBackToYard] = useState(readRouteHome);
   const [candCity, setCandCity] = useState('');
@@ -133,7 +133,7 @@ export default function App() {
     if (!meRef.current) return;
     const err = await flush();
     setPending(pendingCount());
-    if (err) setSyncError(err);
+    if (err) reportSyncError(err);
     try { await adopt(await loadTeamList(), meRef.current); } catch { /* offline: keep the on-phone copy */ }
   }
 
@@ -158,10 +158,10 @@ export default function App() {
         const list = await loadTeamList();
         await adopt(list, m);
         const st = await loadUserState();
-        if (live && st && !Array.isArray(st.route) && Array.isArray(st.myList)) { setMyList(st.myList); try { localStorage.setItem(MYLIST_KEY, JSON.stringify(st.myList)); } catch { /* ignore */ } }
+        // Older versions kept the priority list in user_state; move it onto the prospects (once).
+        if (live && st && Array.isArray(st.myList) && st.myList.length) setLegacyMine(st.myList);
         if (live && st && Array.isArray(st.route)) {
           setRoute(st.route); setBackToYard(st.backToYard !== false);
-          if (Array.isArray(st.myList)) { setMyList(st.myList); try { localStorage.setItem(MYLIST_KEY, JSON.stringify(st.myList)); } catch { /* ignore */ } }
           try { localStorage.setItem(ROUTE_KEY, JSON.stringify(st.route)); localStorage.setItem(ROUTE_HOME_KEY, st.backToYard === false ? '0' : '1'); } catch { /* ignore */ }
         }
       } catch { /* offline: keep the on-phone copy until the next sync */ }
@@ -207,11 +207,18 @@ export default function App() {
     if (account && me?.role === 'owner' && team === null) loadTeam().then(setTeam).catch(() => setSyncError('Could not load the team. Check your connection.'));
   }, [account, me, team]);
 
+  function reportSyncError(err: string) {
+    if (/RESERVED/.test(err)) { window.alert(`A company you added is already on ${OWNER_NAME}'s priority list, so it wasn't added.`); return; }
+    setSyncError(err);
+  }
+
   function persist(ps: Prospect[]) {
+    // Becoming a customer takes a prospect off the priority list, so the team sees it again.
+    ps = ps.map(p => (p.status === 'customer' && p.reservedAt ? { ...p, reservedAt: null } : p));
     if (cloudEnabled && meRef.current) {
       enqueue(diffOps(prospectsRef.current, ps, meRef.current.name));
       setPending(pendingCount());
-      flush().then(err => { setPending(pendingCount()); if (err) setSyncError(err); });
+      flush().then(err => { setPending(pendingCount()); if (err) reportSyncError(err); });
     }
     prospectsRef.current = ps;
     setProspects(ps);
@@ -222,19 +229,24 @@ export default function App() {
 
   // ---- drive route ----
   // Route and the private priority list are per person: kept on the phone and in the person's own user_state row.
-  const pushUserState = (st: { route: number[]; backToYard: boolean; myList: number[] }) => { if (cloudEnabled && meRef.current) saveUserState(meRef.current.email, st); };
+  const pushUserState = (st: { route: number[]; backToYard: boolean }) => { if (cloudEnabled && meRef.current) saveUserState(meRef.current.email, { ...st, myList: [] }); };
   const saveRoute = (ids: number[], home = backToYard) => {
     setRoute(ids);
     try { localStorage.setItem(ROUTE_KEY, JSON.stringify(ids)); } catch { /* ignore */ }
-    pushUserState({ route: ids, backToYard: home, myList });
+    pushUserState({ route: ids, backToYard: home });
   };
-  const saveMyList = (ids: number[]) => {
-    setMyList(ids);
-    try { localStorage.setItem(MYLIST_KEY, JSON.stringify(ids)); } catch { /* ignore */ }
-    pushUserState({ route, backToYard, myList: ids });
-  };
-  const toggleMine = (id: number) => saveMyList(myList.includes(id) ? myList.filter(x => x !== id) : [id, ...myList]);
-  const myStops = myList.map(id => prospects.find(p => p.id === id)).filter((p): p is Prospect => !!p);
+  // The owner's private priority list lives on the prospects themselves (reservedAt), so the database can hide them from the team.
+  const toggleMine = (id: number) => persist(prospects.map(p => (p.id === id ? { ...p, reservedAt: isReserved(p) ? null : Date.now() } : p)));
+  const myStops = isOwner ? prospects.filter(isReserved).sort((a, b) => (b.reservedAt || 0) - (a.reservedAt || 0)) : [];
+  const [legacyMine, setLegacyMine] = useState<number[]>(readMyList);
+  useEffect(() => {
+    if (!isOwner || !legacyMine.length || !prospects.length) return;
+    const ids = new Set(legacyMine), now = Date.now();
+    persist(prospects.map(p => (ids.has(p.id) && !p.reservedAt && p.status !== 'customer' ? { ...p, reservedAt: now } : p)));
+    try { localStorage.removeItem(MYLIST_KEY); } catch { /* ignore */ }
+    pushUserState({ route, backToYard });
+    setLegacyMine([]);
+  }, [isOwner, legacyMine, prospects.length]);
   const toggleRoute = (id: number) => saveRoute(route.includes(id) ? route.filter(x => x !== id) : [...route, id]);
   const routeStops = route.map(id => prospects.find(p => p.id === id)).filter((p): p is Prospect => !!p);
 
@@ -434,7 +446,7 @@ export default function App() {
   const briefLabel = briefAt ? 'Last updated ' + fmtWhen(+briefAt) : 'Not updated yet';
 
   const q = search.toLowerCase();
-  const inF = (p: Prospect, k: Filter) => k === 'all' || (k === 'mine' ? myList.includes(p.id) : (k === 'top' ? !!p.top : k === 'follow' ? ['follow', 'interested'].includes(p.status) : p.status === k));
+  const inF = (p: Prospect, k: Filter) => k === 'all' || (k === 'mine' ? isReserved(p) : (k === 'top' ? !!p.top : k === 'follow' ? ['follow', 'interested'].includes(p.status) : p.status === k));
   const filtered = prospects.filter(p => inF(p, filter) && (!q || [p.company, p.contact, p.city, p.type, p.lead, p.notes, p.address].join(' ').toLowerCase().includes(q)));
   const filterDefs: [Filter, string][] = [['all', 'All'], ...(isOwner ? [['mine', '★ My list']] as [Filter, string][] : []), ['top', 'Top priority'], ['new', 'New'], ['follow', 'Follow-up'], ['customer', 'Customers']];
 
@@ -514,7 +526,7 @@ export default function App() {
         <button className="btn link-btn" onClick={() => setScreen('prospects')}>All prospects</button>
       </div>
       <div className="col" style={{ gap: 10 }}>
-        {queue.slice(0, 5).map(p => <ProspectRow key={p.id} p={p} onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred={isOwner && myList.includes(p.id)} />)}
+        {queue.slice(0, 5).map(p => <ProspectRow key={p.id} p={p} onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred={isOwner && isReserved(p)} />)}
       </div>
     </div>
   );
@@ -534,7 +546,7 @@ export default function App() {
         ))}
       </div>
       <div className="col" style={{ gap: 10 }}>
-        {filtered.slice().sort((a, b) => (b.pinned || 0) - (a.pinned || 0)).map(p => <ProspectRow key={p.id} p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred={isOwner && myList.includes(p.id)} />)}
+        {filtered.slice().sort((a, b) => (b.pinned || 0) - (a.pinned || 0)).map(p => <ProspectRow key={p.id} p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred={isOwner && isReserved(p)} />)}
         {!filtered.length && <p className="muted" style={{ margin: '24px 0', textAlign: 'center', font: "500 15px 'Barlow',sans-serif" }}>No prospects match.</p>}
       </div>
       <button className="btn fab" onClick={openAdd}>+ Add prospect</button>
@@ -634,8 +646,8 @@ export default function App() {
           {route.includes(cur.id) ? `On the route (stop ${route.indexOf(cur.id) + 1}) · Remove` : 'Add to drive route'}
         </button>
         {isOwner && (
-          <button className="btn btn-outline" onClick={() => toggleMine(cur.id)} style={{ height: 52, borderRadius: 14, ...(myList.includes(cur.id) ? { background: '#C9A45C', color: '#0E0D0B' } : {}) }}>
-            {myList.includes(cur.id) ? '★ On my priority list · Remove' : '☆ Add to my priority list'}
+          <button className="btn btn-outline" onClick={() => toggleMine(cur.id)} style={{ height: 52, borderRadius: 14, ...(isReserved(cur) ? { background: '#C9A45C', color: '#0E0D0B' } : {}) }}>
+            {isReserved(cur) ? '★ My priority list (hidden from team) · Remove' : cur.status === 'customer' ? '☆ Customer: visible to the team' : '☆ Add to my priority list'}
           </button>
         )}
         {renderUpdate(cur)}
@@ -681,7 +693,7 @@ export default function App() {
     <div className="prospects" style={{ paddingBottom: 28 }}>
       <button className="btn back" onClick={() => setScreen('today')}>← Today</button>
       <h1 style={{ font: "700 30px/1.05 'Barlow Condensed',sans-serif", color: '#C9A45C' }}>★ My priority list</h1>
-      <span className="muted" style={{ font: "500 14px/1.4 'Barlow',sans-serif" }}>Only you can see this list. Open a prospect and tap ★ to add or remove it.</span>
+      <span className="muted" style={{ font: "500 14px/1.4 'Barlow',sans-serif" }}>Only you can see these. They're hidden from your team until you mark them Customer.</span>
       {!myStops.length && <div className="empty">Nothing here yet.</div>}
       <div className="col" style={{ gap: 10 }}>
         {myStops.map(p => <ProspectRow key={p.id} p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred />)}
@@ -993,7 +1005,7 @@ export default function App() {
   };
 
   function openBrief() { setBrief({ step: 'input', text: '', busy: false, error: '' }); }
-  function openAdd() { setAdd({ type: 'Hauler', interest: 'Dumping' }); }
+  function openAdd() { setAddMsg(''); setAdd({ type: 'Hauler', interest: 'Dumping' }); }
 
   const renderBrief = () => {
     if (!brief) return null;
@@ -1047,8 +1059,13 @@ export default function App() {
     const canSave = !!(add.company && add.phone);
     const set = (k: keyof AddForm) => (e: ChangeEvent<HTMLInputElement>) => { const v = e.target.value; setAdd(a => a && { ...a, [k]: v }); };
     const fields: [keyof AddForm, string, string, string][] = [['company', 'Company', 'text', 'e.g. Perris Valley Grading'], ['contact', 'Contact name', 'text', 'First and last'], ['phone', 'Phone', 'tel', '(951) 555-0100'], ['city', 'City', 'text', 'e.g. Menifee']];
-    const save = () => {
+    const save = async () => {
       if (!canSave) return;
+      if (cloudEnabled && !isOwner) {
+        setAddMsg('Checking…');
+        if (await reservedMatch(add.company!, add.phone!)) { setAddMsg(`This company already exists on ${OWNER_NAME}'s priority list. It can't be added.`); return; }
+        setAddMsg('');
+      }
       persist([{ id: Date.now(), addedAt: Date.now(), addedBy: me?.name, company: add.company!, contact: (add.contact || '').trim(), phone: add.phone!.replace(/\D/g, ''), type: add.type || 'Hauler', city: add.city || '', interest: add.interest || 'Both', status: 'new', next: null, calls: [] }, ...prospects]);
       setAdd(null);
     };
@@ -1072,6 +1089,7 @@ export default function App() {
           {opts(['Hauler', 'Demolition', 'Paving', 'Grading', 'General contractor'], 'type')}
           <span className="field" style={{ marginTop: 4 }}>Materials interested in</span>
           {opts(['Dumping', 'Buying base', 'Both'], 'interest')}
+          {addMsg && <span className="pretty" style={{ font: "600 15px/1.4 'Barlow',sans-serif", color: addMsg === 'Checking…' ? '#A39A8C' : '#F08A80' }}>{addMsg}</span>}
           <button className="btn btn-cta" onClick={save} style={{ background: canSave ? '#C9A45C' : '#3A352E', color: '#F2EEE6', marginTop: 4 }}>Save prospect</button>
         </div>
       </div>

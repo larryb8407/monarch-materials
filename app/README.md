@@ -43,7 +43,8 @@ How it works:
 - Everyone sees and can add/edit all prospects and all calls; each call records who made it. Only the owner sees the daily briefing / Update list.
 - Every change is saved on the phone first and queued (`monarch-outbox`), then uploaded when there is signal. The header shows "N unsent" while changes are waiting.
 - On the owner's first sign-in, if the team list is empty, the list on that phone (with its call history) is uploaded as the starting team list.
-- Each person's drive route and the owner's private ★ priority list are saved in their own `user_state` row (nobody else can read it).
+- Each person's drive route is saved in their own `user_state` row (nobody else can read it).
+- The owner's ★ priority list is stored on the prospect (`data.reservedAt`). The generated `reserved` column plus row-level security hide those prospects and their calls from team members until the status becomes Customer; `reserved_match()` and an insert trigger stop team members adding the same company (name or phone).
 - To avoid double calls: tapping CALL marks the prospect "<name> calling…" for everyone (30 min, cleared on save/discard); anything called in the last 7 days leaves everyone's queue until its follow-up date; calling a prospect someone else reached recently asks first. Changes arrive live via Supabase Realtime (setup.sql adds the tables to the publication), with a 20-second refresh as backup.
 - Prospect page → "Update status, follow-up or notes" changes those without logging a call.
 

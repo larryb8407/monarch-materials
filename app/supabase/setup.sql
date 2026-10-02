@@ -95,3 +95,64 @@ begin
     alter publication supabase_realtime add table public.calls;
   end if;
 end $$;
+
+-- Larry's private priority list: prospects on it are hidden from the team until they become a customer.
+-- Safe to run again.
+alter table public.prospects add column if not exists reserved boolean
+  generated always as (coalesce(data ->> 'reservedAt', '') <> '' and coalesce(data ->> 'status', '') <> 'customer') stored;
+
+create or replace function public.norm_company(t text) returns text language sql immutable
+as $$ select regexp_replace(regexp_replace(lower(coalesce(t, '')), '\m(inc|llc|co|corp|corporation|company|the)\M', '', 'g'), '[^a-z0-9]', '', 'g') $$;
+create or replace function public.phone10(t text) returns text language sql immutable
+as $$ select right(regexp_replace(coalesce(t, ''), '\D', '', 'g'), 10) $$;
+
+drop policy if exists prospects_team on public.prospects;
+drop policy if exists prospects_read on public.prospects;
+drop policy if exists prospects_insert on public.prospects;
+drop policy if exists prospects_update on public.prospects;
+drop policy if exists prospects_delete on public.prospects;
+create policy prospects_read on public.prospects for select to authenticated
+  using (public.my_role() = 'owner' or (public.my_role() is not null and not reserved));
+create policy prospects_insert on public.prospects for insert to authenticated
+  with check (public.my_role() is not null);
+create policy prospects_update on public.prospects for update to authenticated
+  using (public.my_role() = 'owner' or (public.my_role() is not null and not reserved))
+  with check (public.my_role() = 'owner' or (public.my_role() is not null and not reserved));
+create policy prospects_delete on public.prospects for delete to authenticated
+  using (public.my_role() = 'owner' or (public.my_role() is not null and not reserved));
+
+drop policy if exists calls_read on public.calls;
+drop policy if exists calls_insert on public.calls;
+create policy calls_read on public.calls for select to authenticated
+  using (public.my_role() = 'owner' or (public.my_role() is not null
+    and exists (select 1 from public.prospects p where p.id = prospect_id and not p.reserved)));
+create policy calls_insert on public.calls for insert to authenticated
+  with check (public.my_role() is not null and by_email = lower(auth.jwt() ->> 'email')
+    and (public.my_role() = 'owner' or exists (select 1 from public.prospects p where p.id = prospect_id and not p.reserved)));
+
+-- Is this company (by name or phone) on the owner's priority list? Lets the app tell a team member before adding it.
+create or replace function public.reserved_match(company text, phone text) returns boolean
+  language sql stable security definer set search_path = public
+as $$
+  select public.my_role() is not null and exists (
+    select 1 from public.prospects p where p.reserved and (
+      (public.norm_company(company) <> '' and public.norm_company(p.data ->> 'company') = public.norm_company(company))
+      or (length(public.phone10(phone)) = 10 and public.phone10(p.data ->> 'phone') = public.phone10(phone))))
+$$;
+grant execute on function public.reserved_match(text, text) to authenticated;
+
+-- Team members can't add (even offline, uploaded later) a company that is on the owner's priority list.
+create or replace function public.block_reserved_dupes() returns trigger
+  language plpgsql security definer set search_path = public
+as $$
+begin
+  if public.my_role() is distinct from 'owner' and exists (
+    select 1 from public.prospects p where p.reserved and p.id <> new.id and (
+      (public.norm_company(new.data ->> 'company') <> '' and public.norm_company(p.data ->> 'company') = public.norm_company(new.data ->> 'company'))
+      or (length(public.phone10(new.data ->> 'phone')) = 10 and public.phone10(p.data ->> 'phone') = public.phone10(new.data ->> 'phone')))) then
+    raise exception 'RESERVED';
+  end if;
+  return new;
+end $$;
+drop trigger if exists block_reserved_dupes on public.prospects;
+create trigger block_reserved_dupes before insert on public.prospects for each row execute function public.block_reserved_dupes();

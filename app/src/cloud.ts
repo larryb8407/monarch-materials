@@ -255,3 +255,10 @@ export function watchTeamChanges(onChange: () => void): () => void {
     .subscribe();
   return () => { clearTimeout(t); sb.removeChannel(ch); };
 }
+
+/** True when a company with this name or phone is on the owner's priority list (hidden from the team). Null if it can't be checked (offline). */
+export async function reservedMatch(company: string, phone: string): Promise<boolean | null> {
+  if (!sb) return false;
+  const { data, error } = await sb.rpc('reserved_match', { company, phone });
+  return error ? null : !!data;
+}
