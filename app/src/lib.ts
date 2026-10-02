@@ -29,6 +29,8 @@ export interface Prospect {
   addedBy?: string;
   /** A team member asked the owner to call this prospect back. Cleared when the owner calls or marks it handled. */
   attention?: { by: string; at: number; note?: string } | null;
+  /** The owner assigned this follow-up to a team member. Cleared when that person logs a call or update on it. */
+  assigned?: { to: string; toEmail: string; by: string; at: number; note?: string } | null;
   /** On the owner's private priority list since this time: hidden from the team until it becomes a customer. */
   reservedAt?: number | null;
   /** Someone on the team tapped CALL on this prospect and hasn't saved the call yet. */
@@ -158,10 +160,12 @@ export const recentlyCalled = (p: Prospect) => !!p.calls[0] && Date.now() - p.ca
  * then new, then open follow-ups; ties by top priority and score. Prospects someone is calling right now, or that
  * were called in the last week and have no follow-up due, are left out so two people don't call the same company.
  */
-export const queueList = (prospects: Prospect[], ownerView = false) => {
+export const queueList = (prospects: Prospect[], ownerView = false, myEmail = '') => {
   const today = rel(0);
   const rank = (p: Prospect) => {
+    if (p.assigned && p.assigned.toEmail === myEmail) return -2;
     if (ownerView && p.attention) return -2;
+    if (p.assigned && !ownerView) return 9; // someone else's assignment
     if (callingNow(p)) return 9;
     const due = !!p.next && p.next <= today;
     if (p.pinned && !recentlyCalled(p)) return -1;
@@ -178,9 +182,9 @@ export const decorate = (p: Prospect) => {
   const due = !!p.next && p.next <= rel(0);
   const first = p.contact ? p.contact.split(' ')[0] : '';
   return {
-    statusLabel: callingNow(p) ? `${p.calling!.by} calling…` : p.attention ? `Attention ${OWNER_NAME}` : p.pinned ? 'New top lead' : due ? 'Due today' : st.label,
-    chipBg: callingNow(p) ? '#2B5C8A' : p.attention ? '#E07B24' : p.pinned ? '#D6362B' : due ? '#C9A45C' : st.bg,
-    chipFg: callingNow(p) ? '#fff' : p.attention ? '#0E0D0B' : p.pinned ? '#fff' : due ? '#0E0D0B' : st.fg,
+    statusLabel: callingNow(p) ? `${p.calling!.by} calling…` : p.assigned ? `For ${p.assigned.to.split(' ')[0]}` : p.attention ? `Attention ${OWNER_NAME}` : p.pinned ? 'New top lead' : due ? 'Due today' : st.label,
+    chipBg: callingNow(p) ? '#2B5C8A' : p.assigned ? '#5B4FA8' : p.attention ? '#E07B24' : p.pinned ? '#D6362B' : due ? '#C9A45C' : st.bg,
+    chipFg: callingNow(p) ? '#fff' : p.assigned ? '#fff' : p.attention ? '#0E0D0B' : p.pinned ? '#fff' : due ? '#0E0D0B' : st.fg,
     lastLabel: last ? 'Last call ' + fmtWhen(last.at) : 'Never called',
     lastSummary: last ? last.summary : (p.lead || `${p.type} · interested in ${(p.interest || '').toLowerCase()}`),
     contact: p.contact || p.title || 'Main line',

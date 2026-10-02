@@ -12,7 +12,7 @@ import logoUrl from './monarch-logo.webp';
 type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'route' | 'teamday' | 'mylist' | 'call' | 'wrap' | 'drive';
 type Filter = 'all' | 'mine' | 'top' | 'new' | 'follow' | 'customer';
 interface LiveCall { start: number; secs: number; lines: Line[] }
-interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string; attention?: boolean; attentionNote?: string }
+interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string; attention?: boolean; attentionNote?: string; assignTo?: string; assignNote?: string }
 interface Brief { step: 'input' | 'review'; text: string; busy: boolean; error: string; auto?: string; added?: BriefItem[]; updated?: (BriefItem & { id: number })[] }
 interface AddForm { company?: string; contact?: string; phone?: string; city?: string; type: string; interest: string }
 
@@ -35,7 +35,7 @@ const readRoute = (): number[] => { try { const r = JSON.parse(localStorage.getI
 const MYLIST_KEY = 'monarch-mylist';
 const readMyList = (): number[] => { try { const r = JSON.parse(localStorage.getItem(MYLIST_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch { return []; } };
 /** "Update without calling" panel on the prospect page. */
-interface Upd { status: StatusKey; next: string | null; note: string; attention: boolean; attentionNote: string }
+interface Upd { status: StatusKey; next: string | null; note: string; attention: boolean; attentionNote: string; assignTo: string; assignNote: string }
 const readRouteHome = () => { try { return localStorage.getItem(ROUTE_HOME_KEY) !== '0'; } catch { return true; } };
 const readSeen = () => { try { return localStorage.getItem(BRIEF_SEEN_KEY); } catch { return null; } };
 
@@ -135,6 +135,7 @@ export default function App() {
     setPending(pendingCount());
     if (err) reportSyncError(err);
     try { await adopt(await loadTeamList(), meRef.current); } catch { /* offline: keep the on-phone copy */ }
+    if (meRef.current.role === 'owner') loadTeam().then(setTeam).catch(() => {});
   }
 
   // Shows the team list; the first time, this phone's own earlier work (calls, added prospects) is merged in and uploaded.
@@ -202,10 +203,10 @@ export default function App() {
     return watchTeamChanges(() => { if (document.visibilityState === 'visible') sync(); });
   }, [me]);
 
-  // Owner's Team list: (re)load whenever the account sheet is open and the list was reset.
+  // Owner's Team list: needed for the Team sheet and for assigning follow-ups; (re)load whenever it was reset.
   useEffect(() => {
-    if (account && me?.role === 'owner' && team === null) loadTeam().then(setTeam).catch(() => setSyncError('Could not load the team. Check your connection.'));
-  }, [account, me, team]);
+    if (me?.role === 'owner' && team === null) loadTeam().then(setTeam).catch(() => setSyncError('Could not load the team. Check your connection.'));
+  }, [me, team]);
 
   function reportSyncError(err: string) {
     if (/RESERVED/.test(err)) { window.alert(`A company you added is already on ${OWNER_NAME}'s priority list, so it wasn't added.`); return; }
@@ -250,7 +251,16 @@ export default function App() {
   const toggleRoute = (id: number) => saveRoute(route.includes(id) ? route.filter(x => x !== id) : [...route, id]);
   const routeStops = route.map(id => prospects.find(p => p.id === id)).filter((p): p is Prospect => !!p);
 
-  const queue = queueList(prospects, cloudEnabled && isOwner);
+  const queue = queueList(prospects, cloudEnabled && isOwner, me?.email);
+  const assignedToMe = cloudEnabled && me ? prospects.filter(p => p.assigned?.toEmail === me.email).sort((a, b) => b.assigned!.at - a.assigned!.at) : [];
+  const callers = (team || []).filter(m => m.role === 'caller');
+  /** The owner assigning a follow-up: who, with an optional note. Assigning takes it off the private priority list so they can see it. */
+  const assignment = (p: Prospect, toEmail: string | undefined, note: string | undefined) => {
+    if (!isOwner || toEmail === undefined) return {};
+    if (toEmail === '') return { assigned: null };
+    const m = callers.find(c => c.email === toEmail); if (!m) return {};
+    return { assigned: { to: m.name || m.email, toEmail: m.email, by: me?.name || OWNER_NAME, at: Date.now(), note: (note || '').trim() }, reservedAt: null };
+  };
   const attention = cloudEnabled && isOwner ? prospects.filter(p => p.attention).sort((a, b) => b.attention!.at - a.attention!.at) : [];
   const today = rel(0);
   const T0 = startOfToday();
@@ -325,6 +335,7 @@ export default function App() {
     const p = prospects.find(x => x.id === id); if (!p || !cloudEnabled) return true;
     const c = callingNow(p);
     if (c && c.by !== me?.name) return window.confirm(`${c.by} started calling ${p.company} at ${new Date(c.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} and hasn't saved the call yet.\n\nCall anyway?`);
+    if (p.assigned && p.assigned.toEmail !== me?.email && !isOwner) return window.confirm(`${p.assigned.by} assigned ${p.company} to ${p.assigned.to}.\n\nCall anyway?`);
     const last = p.calls[0];
     if (last && recentlyCalled(p) && last.by && last.by !== me?.name) return window.confirm(`${last.by} already called ${p.company} ${fmtWhen(last.at)} (${(OUTCOME[last.outcome] || OUTCOME.none).label}).\n\nCall anyway?`);
     return true;
@@ -352,6 +363,9 @@ export default function App() {
       ...p, pinned: null, calling: null,
       // The owner calling it back clears the flag; a team member can raise it.
       attention: isOwner ? null : wrap.attention ? { by: me?.name || 'Team', at: Date.now(), note: (wrap.attentionNote || '').trim() } : p.attention ?? null,
+      // An assignment is done once the assignee logs the call; the owner can (re)assign here.
+      ...(p.assigned && p.assigned.toEmail === me?.email ? { assigned: null } : {}),
+      ...assignment(p, wrap.assignTo, wrap.assignNote),
       status: OUTCOME[oc].status || ((wrap.follow ?? 0) > 0 ? 'follow' : p.status),
       next: next === undefined ? (p.next && p.next <= today ? null : p.next) : next,
       calls: [{ id: call.start * 1000 + Math.floor(Math.random() * 1000), at: call.start, secs: call.secs, outcome: oc, summary, lines: [], by: me?.name, ...(wrap.attention && !isOwner ? { attention: true } : {}) }, ...p.calls],
@@ -371,7 +385,7 @@ export default function App() {
   const drvRaw = dq[driveIdx];
   const drvP = drvRaw ? prospects.find(p => p.id === drvRaw.id) || drvRaw : null;
 
-  const startDrive = () => { driveQueue.current = queueList(prospects, cloudEnabled && isOwner); setScreen('drive'); setDriveIdx(0); };
+  const startDrive = () => { driveQueue.current = queueList(prospects, cloudEnabled && isOwner, me?.email); setScreen('drive'); setDriveIdx(0); };
   const driveCall = (p: Prospect | undefined) => { if (!p || !okToCall(p.id)) return; wasDrive.current = true; setPrev('drive'); placeCall(p.id); };
   const driveNext = () => setDriveIdx(i => Math.min(i + 1, dq.length));
   const drivePrev = () => setDriveIdx(i => Math.max(i - 1, 0));
@@ -466,8 +480,23 @@ export default function App() {
           : <div className="stat card"><b>{callsToday}</b><span>Calls made today</span></div>}
         <div className="stat card"><b style={{ color: '#D9B872' }}>{prospects.filter(p => p.next && p.next <= today).length}</b><span>Follow-ups due</span></div>
       </div>
+      {assignedToMe.length > 0 && (
+        <div className="card col" style={{ borderRadius: 16, padding: '14px 14px 6px 16px', gap: 10, border: '1.5px solid #5B4FA8', background: '#1C1830' }}>
+          <span style={{ font: "800 20px/1 'Barlow Condensed',sans-serif", letterSpacing: '.04em', textTransform: 'uppercase', color: '#A99BF0' }}>Assigned to you · {assignedToMe.length}</span>
+          {assignedToMe.map(p => (
+            <div key={p.id} className="row" style={{ gap: 12, paddingBottom: 8, borderTop: '1px solid #2E2850', paddingTop: 10 }}>
+              <button className="btn col" onClick={() => open(p.id)} style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                <span className="prow-name" style={{ fontSize: 17 }}>{p.company}</span>
+                <span style={{ font: "600 13px/1.3 'Barlow',sans-serif", color: '#A99BF0' }}>From {p.assigned!.by} · {fmtWhen(p.assigned!.at)}{p.next ? ` · follow up ${new Date(p.next + 'T12:00').toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}</span>
+                {p.assigned!.note && <span className="pretty" style={{ font: "600 15px/1.35 'Barlow',sans-serif", color: '#F2EEE6' }}>“{p.assigned!.note}”</span>}
+              </button>
+              <button className="btn call-dot" aria-label={`Call ${p.company}`} onClick={() => callFrom(p.id)} style={{ width: 54, height: 54 }}>CALL</button>
+            </div>
+          ))}
+        </div>
+      )}
       {attention.length > 0 && (
-        <div className="card col" style={{ borderRadius: 16, padding: '14px 14px 6px 16px', gap: 10, border: '1.5px solid #E07B24', background: '#2A1A10' }}>
+        <div className="card col\" style={{ borderRadius: 16, padding: '14px 14px 6px 16px', gap: 10, border: '1.5px solid #E07B24', background: '#2A1A10' }}>
           <span style={{ font: "800 20px/1 'Barlow Condensed',sans-serif", letterSpacing: '.04em', textTransform: 'uppercase', color: '#E07B24' }}>Attention {OWNER_NAME} · {attention.length}</span>
           {attention.map(p => (
             <div key={p.id} className="row" style={{ gap: 12, paddingBottom: 8, borderTop: '1px solid #3A2A1E', paddingTop: 10 }}>
@@ -553,11 +582,38 @@ export default function App() {
     </div>
   );
 
+  // Owner only: pick a team member to do this follow-up, with an optional note for them.
+  const renderAssign = (p: Prospect | undefined, to: string | undefined, note: string | undefined, set: (to: string | undefined, note?: string) => void) => {
+    if (!cloudEnabled || !isOwner) return null;
+    const cur = p?.assigned;
+    return (
+      <>
+        <span className="label" style={{ color: '#A99BF0' }}>Assign follow-up to</span>
+        {!callers.length
+          ? <span className="muted" style={{ font: "500 14px 'Barlow',sans-serif" }}>{team === null ? 'Loading team…' : 'Add team members under your name (top right) → Team.'}</span>
+          : <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              {callers.map(m => {
+                const on = to === m.email || (to === undefined && cur?.toEmail === m.email);
+                return <button key={m.email} className="btn toggle opt" onClick={() => set(on && to !== undefined ? undefined : m.email)} style={{ background: on ? '#5B4FA8' : '#1A1815', color: on ? '#fff' : '#F2EEE6', borderColor: '#5B4FA8' }}>{on ? '✓ ' : ''}{m.name || m.email}</button>;
+              })}
+              {cur && <button className="btn toggle opt" onClick={() => set(to === '' ? undefined : '')} style={{ background: to === '' ? '#C9A45C' : '#1A1815', color: to === '' ? '#0E0D0B' : '#F2EEE6' }}>Unassign</button>}
+            </div>}
+        {to && (
+          <label className="field" style={{ color: '#A99BF0' }}>Note for {(callers.find(c => c.email === to)?.name || 'them').split(' ')[0]} (optional)
+            <textarea className="textarea" value={note || ''} onChange={e => set(to, e.target.value)} placeholder="What to say, who to ask for, when to call…"
+              style={{ minHeight: 70, font: "500 16px/1.4 'Barlow',sans-serif", textTransform: 'none', letterSpacing: 0, borderColor: '#5B4FA8' }} />
+          </label>
+        )}
+        {to && p && isReserved(p) && <span style={{ font: "500 13px/1.4 'Barlow',sans-serif", color: '#A39A8C' }}>Assigning takes it off your priority list so they can see it.</span>}
+      </>
+    );
+  };
+
   // Change status / follow-up / notes without making a call.
   const renderUpdate = (p: Prospect) => {
     if (!upd || activeId !== p.id) {
       return (
-        <button className="btn btn-outline" onClick={() => setUpd({ status: p.status, next: p.next, note: '', attention: false, attentionNote: '' })} style={{ height: 52, borderRadius: 14, borderColor: '#3A352E', color: '#F2EEE6' }}>
+        <button className="btn btn-outline" onClick={() => setUpd({ status: p.status, next: p.next, note: '', attention: false, attentionNote: '', assignTo: '', assignNote: '' })} style={{ height: 52, borderRadius: 14, borderColor: '#3A352E', color: '#F2EEE6' }}>
           Update status, follow-up or notes
         </button>
       );
@@ -572,6 +628,8 @@ export default function App() {
         ...x, status: u.status, next: u.next,
         notes: u.note.trim() ? [x.notes, stamp + u.note.trim()].filter(Boolean).join('\n') : x.notes,
         attention: u.attention ? { by: me?.name || 'Team', at: Date.now(), note: u.attentionNote.trim() } : x.attention ?? null,
+        ...(x.assigned && x.assigned.toEmail === me?.email ? { assigned: null } : {}),
+        ...assignment(x, u.assignTo === '-' ? '' : u.assignTo || undefined, u.assignNote),
       }));
       setUpd(null);
     };
@@ -593,6 +651,7 @@ export default function App() {
         <label className="field">Or pick a date
           <input type="date" value={u.next || ''} onChange={e => set({ next: e.target.value || null })} style={{ colorScheme: 'dark' }} />
         </label>
+        {renderAssign(p, u.assignTo === '-' ? '' : u.assignTo || undefined, u.assignNote, (to, note) => set({ assignTo: to === undefined ? '' : to === '' ? '-' : to, assignNote: note ?? (to ? u.assignNote : '') }))}
         {cloudEnabled && !isOwner && (
           <>
             <button className="btn toggle" onClick={() => set({ attention: !u.attention })} style={{ alignSelf: 'flex-start', height: 46, padding: '0 16px', borderRadius: 23, fontSize: 15, fontWeight: 700, background: u.attention ? '#E07B24' : '#1A1815', color: u.attention ? '#0E0D0B' : '#E07B24', borderColor: '#E07B24' }}>
@@ -655,6 +714,15 @@ export default function App() {
           {cur.email && <a href={'mailto:' + cur.email} style={{ font: "600 15px/1.4 'Barlow',sans-serif", color: '#D9B872', wordBreak: 'break-all' }}>{cur.email}</a>}
           {cur.address && <span className="muted" style={{ font: "500 15px/1.4 'Barlow',sans-serif" }}>{cur.address}</span>}
         </div>
+        {cur.assigned && (isOwner || cur.assigned.toEmail === me?.email) && (
+          <div className="follow-banner" style={{ background: '#1C1830', color: '#A99BF0', border: '1.5px solid #5B4FA8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span className="col" style={{ gap: 4 }}>
+              <span>{isOwner ? `Assigned to ${cur.assigned.to}` : `${cur.assigned.by} assigned this to you`} · {fmtWhen(cur.assigned.at)}</span>
+              {cur.assigned.note && <span style={{ color: '#F2EEE6', fontWeight: 500 }}>“{cur.assigned.note}”</span>}
+            </span>
+            {isOwner && <button className="btn" onClick={() => persist(prospects.map(p => (p.id === cur.id ? { ...p, assigned: null } : p)))} style={{ flex: 'none', font: "700 14px 'Barlow',sans-serif", color: '#A99BF0', padding: '6px 0' }}>Unassign</button>}
+          </div>
+        )}
         {cur.attention && (
           <div className="follow-banner" style={{ background: '#2A1A10', color: '#E8A86A', border: '1.5px solid #E07B24', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <span className="col" style={{ gap: 4 }}>
@@ -696,7 +764,13 @@ export default function App() {
       <span className="muted" style={{ font: "500 14px/1.4 'Barlow',sans-serif" }}>Only you can see these. They're hidden from your team until you mark them Customer.</span>
       {!myStops.length && <div className="empty">Nothing here yet.</div>}
       <div className="col" style={{ gap: 10 }}>
-        {myStops.map(p => <ProspectRow key={p.id} p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred />)}
+        {myStops.map(p => (
+          <div key={p.id} className="col" style={{ gap: 4 }}>
+            <ProspectRow p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred />
+            <button className="btn" onClick={() => { if (window.confirm(`Remove ${p.company} from your priority list? Your team will be able to see it again.`)) toggleMine(p.id); }}
+              style={{ alignSelf: 'flex-end', padding: '4px 6px', font: "600 14px 'Barlow',sans-serif", color: '#F08A80' }}>Remove from my list</button>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -947,6 +1021,7 @@ export default function App() {
                 style={{ minHeight: 80, font: "500 16px/1.4 'Barlow',sans-serif", textTransform: 'none', letterSpacing: 0, borderColor: '#E07B24' }} />
             </label>
           )}
+          {renderAssign(cur, w.assignTo, w.assignNote, (to, note) => setWrap(x => x && { ...x, assignTo: to, assignNote: note ?? (to ? x.assignNote : '') }))}
           <div className="between">
             <span className="label">Notes</span>
             <button className="btn" onClick={toggleDictate} style={{ height: 40, padding: '0 14px', borderRadius: 20, background: dictating ? '#C9A45C' : '#2E2A24', color: dictating ? '#0E0D0B' : '#F2EEE6', display: 'flex', alignItems: 'center', font: "700 14px 'Barlow',sans-serif" }}>
@@ -1221,7 +1296,7 @@ export default function App() {
         <nav className="tabs">
           {tabs.map(([k, label]) => (
             <button key={k} className="btn tab" onClick={() => { if (k === 'drive') return startDrive(); if (k === screen && mainRef.current) { mainRef.current.scrollTop = 0; scrollPos.current[k] = 0; } setScreen(k); }} style={{ color: tabKey === k ? '#C9A45C' : '#8A8276' }}>
-              <i style={{ background: tabKey === k ? '#C9A45C' : 'transparent' }} />{label}{k === 'route' && routeStops.length > 0 && <b className="tab-count">{routeStops.length}</b>}{k === 'today' && attention.length > 0 && <b className="tab-count" style={{ background: '#E07B24' }}>{attention.length}</b>}
+              <i style={{ background: tabKey === k ? '#C9A45C' : 'transparent' }} />{label}{k === 'route' && routeStops.length > 0 && <b className="tab-count">{routeStops.length}</b>}{k === 'today' && attention.length + assignedToMe.length > 0 && <b className="tab-count" style={{ background: attention.length ? '#E07B24' : '#5B4FA8' }}>{attention.length + assignedToMe.length}</b>}
             </button>
           ))}
         </nav>

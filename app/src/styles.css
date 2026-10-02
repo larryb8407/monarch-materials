@@ -161,3 +161,4 @@ h1, h2, p { margin: 0; }
 .signin { flex: 1; overflow-y: auto; padding: 32px 22px; display: flex; flex-direction: column; gap: 14px; }
 .signin h1 { font: 700 34px/1.05 var(--cond); }
 .signin p { font: 500 16px/1.45 var(--sans); }
+.wrap-body > * { flex-shrink: 0; }
