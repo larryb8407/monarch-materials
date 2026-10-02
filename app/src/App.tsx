@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   BRIEF_AT_KEY, BRIEF_SEEN_KEY, CLAUDE_BRIEF_PROMPT, DRIVE_AUTO_NEXT, OUTCOME, STATUS, STORAGE_KEY, callingNow, recentlyCalled,
   ROUTE_HOME_KEY, ROUTE_KEY, OWNER_NAME, decorate, fetchAutoBrief, fmtPhone, placeOf, routeLegs, fmtTime, fmtWhen, isMobile, normName, parseCSV, queueList, rel, seedProspects, startOfToday, toProspect,
@@ -9,7 +9,7 @@ import { addMember, loadUserState, saveUserState, watchTeamChanges, cloudEnabled
 import bundledProspects from './prospects.json';
 import logoUrl from './monarch-logo.webp';
 
-type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'route' | 'teamday' | 'call' | 'wrap' | 'drive';
+type Screen = 'today' | 'prospects' | 'detail' | 'log' | 'route' | 'teamday' | 'mylist' | 'call' | 'wrap' | 'drive';
 type Filter = 'all' | 'mine' | 'top' | 'new' | 'follow' | 'customer';
 interface LiveCall { start: number; secs: number; lines: Line[] }
 interface Wrap { outcome: OutcomeKey | null; follow: number | null; note: string; summary: string; attention?: boolean; attentionNote?: string }
@@ -247,6 +247,53 @@ export default function App() {
   const open = (id: number) => { setActiveId(id); setPrev(screen); setScreen('detail'); setUpd(null); };
   const leaveDetail = () => setScreen(prev === 'detail' ? 'today' : prev);
 
+  // ---- phone back button: step back inside the app instead of closing it ----
+  // While anything other than the Today screen is showing, one extra history entry is kept; pressing back pops it
+  // and we go back one step in the app (close a sheet, prospect → list, tab → Today).
+  const isRoot = screen === 'today' && !brief && !add && !edit && !account && !upd;
+  const goBack = () => {
+    if (brief) return setBrief(null);
+    if (add) return setAdd(null);
+    if (edit) return setEdit(null);
+    if (account) return setAccount(false);
+    if (upd) return setUpd(null);
+    if (screen === 'detail') return leaveDetail();
+    if (screen === 'drive') return exitDrive();
+    if (screen === 'call' || screen === 'wrap') return; // finish or discard the call first
+    if (screen !== 'today') setScreen('today');
+  };
+  const backRef = useRef(goBack);
+  backRef.current = goBack;
+  const isRootRef = useRef(isRoot);
+  isRootRef.current = isRoot;
+  const pushed = useRef(false);
+  const ignorePop = useRef(false);
+  const syncHistory = () => {
+    if (!isRootRef.current && !pushed.current) { history.pushState({ monarch: 1 }, ''); pushed.current = true; }
+    else if (isRootRef.current && pushed.current) { pushed.current = false; ignorePop.current = true; history.back(); }
+  };
+  useEffect(syncHistory, [isRoot]);
+  useEffect(() => {
+    const onPop = () => {
+      if (ignorePop.current) { ignorePop.current = false; return; }
+      pushed.current = false;
+      backRef.current();
+      setTimeout(syncHistory, 0);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // ---- keep each list's scroll position when you open a prospect and come back ----
+  const mainRef = useRef<HTMLElement>(null);
+  const scrollPos = useRef<Record<string, number>>({});
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  useLayoutEffect(() => {
+    const el = mainRef.current; if (!el) return;
+    el.scrollTop = screen === 'detail' ? 0 : scrollPos.current[screen] ?? 0;
+  }, [screen, activeId]);
+
   // ---- calls ----
   function placeCall(id: number) {
     const p = prospects.find(x => x.id === id); if (!p) return;
@@ -382,7 +429,8 @@ export default function App() {
 
   // ---- rendering ----
   const showChrome = !['call', 'wrap', 'drive'].includes(screen);
-  const tabKey = screen === 'detail' ? (prev === 'teamday' ? 'today' : prev) : screen === 'teamday' ? 'today' : screen;
+  const underToday = (s: Screen) => (s === 'teamday' || s === 'mylist' ? 'today' : s);
+  const tabKey = underToday(screen === 'detail' ? prev : screen);
   const briefLabel = briefAt ? 'Last updated ' + fmtWhen(+briefAt) : 'Not updated yet';
 
   const q = search.toLowerCase();
@@ -423,13 +471,10 @@ export default function App() {
         </div>
       )}
       {isOwner && myStops.length > 0 && (
-        <div className="col" style={{ gap: 10 }}>
-          <div className="between" style={{ alignItems: 'baseline' }}>
-            <h2 className="h-section" style={{ color: '#C9A45C' }}>★ My priority list · {myStops.length}</h2>
-            <button className="btn link-btn" onClick={() => { setFilter('mine'); setScreen('prospects'); }}>See all</button>
-          </div>
-          {myStops.slice(0, 5).map(p => <ProspectRow key={p.id} p={p} onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred />)}
-        </div>
+        <button className="btn brief-card card" onClick={() => setScreen('mylist')}>
+          <span style={{ font: "800 20px/1 'Barlow Condensed',sans-serif", letterSpacing: '.04em', textTransform: 'uppercase', color: '#C9A45C' }}>★ My priority list · {myStops.length}</span>
+          <span style={{ font: "800 22px/1 'Barlow Condensed',sans-serif", color: '#C9A45C' }}>›</span>
+        </button>
       )}
       {isOwner && autoBrief && (
         <button className="btn brief-card" onClick={reviewAutoBrief} style={{ background: '#2A2316', border: '1.5px solid #C9A45C' }}>
@@ -630,6 +675,19 @@ export default function App() {
       </div>
     );
   };
+
+  // Owner only: the private ★ priority list on its own screen.
+  const renderMyList = () => (
+    <div className="prospects" style={{ paddingBottom: 28 }}>
+      <button className="btn back" onClick={() => setScreen('today')}>← Today</button>
+      <h1 style={{ font: "700 30px/1.05 'Barlow Condensed',sans-serif", color: '#C9A45C' }}>★ My priority list</h1>
+      <span className="muted" style={{ font: "500 14px/1.4 'Barlow',sans-serif" }}>Only you can see this list. Open a prospect and tap ★ to add or remove it.</span>
+      {!myStops.length && <div className="empty">Nothing here yet.</div>}
+      <div className="col" style={{ gap: 10 }}>
+        {myStops.map(p => <ProspectRow key={p.id} p={p} compact onOpen={open} onCall={callFrom} onRoute={toggleRoute} routed={route.includes(p.id)} starred />)}
+      </div>
+    </div>
+  );
 
   // Owner only: everything the team did today, newest first.
   const renderTeamDay = () => {
@@ -1132,18 +1190,19 @@ export default function App() {
             : <span className="header-label">{screen === 'log' ? 'Call log' : screen === 'route' ? 'Drive route' : 'Prospecting'}</span>}
         </header>
       )}
-      <main className="main">
+      <main className="main" ref={mainRef} onScroll={e => { scrollPos.current[screenRef.current] = e.currentTarget.scrollTop; }}>
         {screen === 'today' && renderToday()}
         {screen === 'prospects' && renderProspects()}
         {screen === 'detail' && renderDetail()}
         {screen === 'log' && renderLog()}
         {screen === 'route' && renderRoute()}
         {screen === 'teamday' && isOwner && renderTeamDay()}
+        {screen === 'mylist' && isOwner && renderMyList()}
       </main>
       {showChrome && (
         <nav className="tabs">
           {tabs.map(([k, label]) => (
-            <button key={k} className="btn tab" onClick={() => (k === 'drive' ? startDrive() : setScreen(k))} style={{ color: tabKey === k ? '#C9A45C' : '#8A8276' }}>
+            <button key={k} className="btn tab" onClick={() => { if (k === 'drive') return startDrive(); if (k === screen && mainRef.current) { mainRef.current.scrollTop = 0; scrollPos.current[k] = 0; } setScreen(k); }} style={{ color: tabKey === k ? '#C9A45C' : '#8A8276' }}>
               <i style={{ background: tabKey === k ? '#C9A45C' : 'transparent' }} />{label}{k === 'route' && routeStops.length > 0 && <b className="tab-count">{routeStops.length}</b>}{k === 'today' && attention.length > 0 && <b className="tab-count" style={{ background: '#E07B24' }}>{attention.length}</b>}
             </button>
           ))}
